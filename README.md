@@ -84,7 +84,7 @@ The verbal summary is not enough for implementation. A coding agent must analyze
 
 Security vulnerabilities cost companies billions annually. Most development teams lack dedicated security engineers to review code before deployment. With the rise of **vibe coding** (non-technical users building software with AI agents), security risks have multiplied. CSReview bridges this gap by providing:
 
-1. **Automated Pentest-Level Analysis**: Goes beyond basic linting - performs the same depth of analysis a human security consultant would do
+1. **Development-Time Security Alignment**: Goes beyond basic linting with static source/config review, Semgrep/SCA evidence, and a security consultant's adversarial reasoning without probing live systems
 2. **Dual Report System**:
    - **HTML Report** in the user's language for human understanding
    - **Markdown Report** in English for AI coding agents to parse and plan remediations without changing the audited code automatically
@@ -424,7 +424,7 @@ Simply ask your AI coding assistant:
 
 ### Pre-Deployment Review
 ```
-@csreview Run a full security audit before production deployment
+@csreview Run a full local workspace security review before release
 ```
 
 ### Backend Security
