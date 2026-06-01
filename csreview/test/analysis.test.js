@@ -572,6 +572,20 @@ test('skill defines compatible scatter-gather security subagent orchestration', 
   assert.match(docs, /fallback to sequential/i);
 });
 
+test('skill defines subagent orchestration DoD and non-negotiable rules', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Subagent Orchestration DoD/i);
+  assert.match(docs, /csreview-reports\/\.partials\/<subagent>\.json/);
+  assert.match(docs, /Subagents MUST NOT write final reports/i);
+  assert.match(docs, /coordinator is the only writer/i);
+  assert.match(docs, /dedup -> ASVS -> compliance -> score -> report/i);
+  assert.match(docs, /one pair of final reports/i);
+  assert.match(docs, /sum of partial findings after deduplication/i);
+  assert.match(docs, /no tool appears executed more than once/i);
+  assert.match(docs, /Non-negotiable rules/i);
+});
+
 test('code and docs do not contain stale typo or Semgrep generic report excludes', () => {
   const detector = fs.readFileSync('src/detector.js', 'utf8');
   const index = fs.readFileSync('src/index.js', 'utf8');

@@ -174,8 +174,8 @@ The dependency graph is:
 2. **Compatibility-gated fan-out**: spawn only the subagents that match the map. Examples: do not spawn a Delphi subagent without Pascal/Delphi files; do not spawn a Firebase subagent without Firebase rules/config; do not spawn a Go subagent without Go modules/files.
 3. **Parallel validation**: compatible subagents validate candidate findings in their domain by reading the shared map, relevant local files, and cached tool output. They must not rerun heavy SAST/SCA tools across the whole tree.
 4. **Gather barrier**: wait for all subagents to finish before ASVS/compliance correlation.
-5. **Reduce/correlation**: one coordinator merges all partial findings, runs deduplication, applies ASVS/compliance mapping, calculates score, and prepares the report.
-6. **Single writer**: only the coordinator writes final HTML/Markdown reports. Subagents may write partial JSON only under a scratch area inside `csreview-reports/`, and those partial files must use the canonical finding schema.
+5. **Reduce/correlation**: one coordinator merges all partial findings, then runs `dedup -> ASVS -> compliance -> score -> report` in that order.
+6. **Single writer**: Subagents MUST NOT write final reports. They may write only partial JSON to `csreview-reports/.partials/<subagent>.json`. The coordinator is the only writer for `<agent>_security-report.html` and `<agent>_security-findings.md`, and partial files must use the canonical finding schema.
 
 Hard rules:
 
@@ -184,6 +184,22 @@ Hard rules:
 - Every subagent finding must use the canonical finding schema (`id`, `severity`, `category`, `name`, `description`, `file`, `line`, `vulnerableCode`, `cwe`, `owasp`, `fix`, `confidence`, `exploitation`, `references`, `source`). Use `source: "subagent:<domain>"`, for example `source: "subagent:auth"`, so the coordinator can correlate and deduplicate against `csreview-detector`, `semgrep`, `npm-audit`, and `osv-scanner`.
 - Subagents do not write final reports and do not modify audited source code.
 - The coordinator owns final deduplication. Matching `file:line:CWE` evidence from multiple sources can be promoted to `CONFIRMED`.
+
+#### Subagent Orchestration DoD
+
+1. **Single writer**: Subagents MUST NOT write final reports. Each subagent writes only partial findings JSON to its own scratch file, for example `csreview-reports/.partials/<subagent>.json`. The coordinator is the only writer for `<agent>_security-report.html` and `<agent>_security-findings.md`.
+2. **Canonical schema**: every subagent finding uses the engine finding object (`severity`, `category`, `file`, `line`, `cwe`, `confidence`, `fix`, and related fields) and sets `source: "subagent:<domain>"`. Without this, `deduplicateFindings` cannot correlate evidence or promote confidence to `CONFIRMED`.
+3. **Tool runs once**: Semgrep, npm audit, OSV-Scanner, Trivy, and similar whole-tree SAST/SCA tools run only during Phase 0/1. Their JSON output is cached, and subagents read the cache instead of re-executing tools on the tree.
+4. **Compatibility-gated fan-out**: spawn a subagent only when Phase 1 detected its stack, framework, or ruleset. Do not spawn technology-specific subagents for absent ecosystems.
+5. **Barrier before reduce**: ASVS mapping, compliance mapping, and score calculation run only after all partial findings have returned. The coordinator applies `dedup -> ASVS -> compliance -> score -> report`.
+
+**Final check**: CSReview produces one pair of final reports, the final count matches the sum of partial findings after deduplication, and no tool appears executed more than once in the log.
+
+#### Non-negotiable rules
+
+1. **Single writer**: subagents write partial JSON only; the coordinator writes final reports.
+2. **Canonical schema**: subagent findings must use the engine finding object and `source: "subagent:<domain>"`.
+3. **Tool runs once**: whole-tree SAST/SCA tools run in Phase 0/1 only; subagents read cached JSON.
 
 ### Phase 0: Security Tool Detection & Integration
 
