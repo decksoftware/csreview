@@ -44,6 +44,16 @@ export function calculateSecurityScore(findings = [], projectInfo = {}) {
   const fileCount = getAuditedFileSet(projectInfo, safeFindings).size || 1;
   const density = totalWeight / fileCount;
   const rawScore = 100 - (density * 5);
+  const severities = new Set(safeFindings.map(finding => finding?.severity));
+  const severityCap = severities.has('CRITICAL')
+    ? 49
+    : severities.has('HIGH')
+      ? 74
+      : severities.has('MEDIUM')
+        ? 89
+        : severities.has('LOW')
+          ? 97
+          : 100;
 
-  return Math.max(0, Math.min(100, Math.round(rawScore)));
+  return Math.max(0, Math.min(severityCap, Math.round(rawScore)));
 }

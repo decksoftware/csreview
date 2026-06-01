@@ -21,9 +21,16 @@ const OWASP_CATEGORY_MAP = {
   'Sensitive Data Exposure': 'A02:2021',
   'XML External Entities': 'A05:2021',
   'Broken Access Control': 'A01:2021',
+  'Access Control': 'A01:2021',
   'Security Misconfiguration': 'A05:2021',
   'Cross-Site Scripting': 'A03:2021',
   'Insecure Deserialization': 'A08:2021',
+  'Dependency Vulnerability': 'A06:2021',
+  'Supply Chain': 'A08:2021',
+  'Memory Safety': 'A06:2021',
+  'Data Leakage': 'A09:2021',
+  'Cryptography': 'A02:2021',
+  'Authentication': 'A07:2021',
   'Using Components with Known Vulnerabilities': 'A06:2021',
   'Insufficient Logging & Monitoring': 'A09:2021',
   'Server-Side Request Forgery': 'A10:2021',
@@ -32,6 +39,15 @@ const OWASP_CATEGORY_MAP = {
   'Software and Data Integrity Failures': 'A08:2021',
   'Security Logging and Monitoring Failures': 'A09:2021'
 };
+
+function readPackageVersion() {
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+    return packageJson.version || '0.0.1';
+  } catch {
+    return '0.0.1';
+  }
+}
 
 function getLanguageFromExtension(file) {
   const ext = path.extname(file).toLowerCase();
@@ -512,7 +528,11 @@ function buildToolMetadata(toolResults) {
 }
 
 function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
-  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  const durationMs = Number.isFinite(Number(metadata.durationMs))
+    ? Number(metadata.durationMs)
+    : Date.now() - Number(metadata.analysisStartTime || startTime);
+  const duration = (durationMs / 1000).toFixed(2);
+  const scannerVersion = metadata.packageVersion || readPackageVersion();
   const confidenceBreakdown = { CONFIRMED: 0, 'TOOL-ONLY': 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const f of findings) {
     const c = String(f.confidence || 'MEDIUM').toUpperCase();
@@ -524,7 +544,7 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
 
   return `## Scan Metadata
 
-- **Scanner**: CSReview v2.0.0
+- **Scanner**: CSReview v${scannerVersion}
 - **Files Scanned**: ${filesCount}
 - **Config Files**: ${configCount}
 ${buildToolMetadata(metadata.toolResults)}

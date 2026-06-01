@@ -437,8 +437,8 @@ function detectProjectType(frameworks, depFiles, rootDir) {
   return 'unknown';
 }
 
-function detectBaasFiles(rootDir) {
-  const patterns = [
+function getBaasFilePatterns() {
+  return [
     'supabase/config.toml',
     'supabase/migrations/*.sql',
     'supabase/seed.sql',
@@ -459,8 +459,6 @@ function detectBaasFiles(rootDir) {
     'drizzle.config.*',
     'prisma/schema.prisma'
   ];
-
-  return patterns;
 }
 
 export function readFileSafe(filePath) {
@@ -575,7 +573,7 @@ export async function scanProject(rootDir) {
     }
   }
 
-  const baasPatterns = detectBaasFiles(rootDir);
+  const baasPatterns = getBaasFilePatterns();
   const baasFiles = [];
   for (const pattern of baasPatterns) {
     try {

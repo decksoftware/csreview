@@ -44,7 +44,6 @@ const LANG_MAP = {
   'rb': 'ruby',
   'cs': 'csharp',
   'swift': 'swift',
-  'dart': 'dart',
   'c': 'c',
   'h': 'c',
   'cpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp',
@@ -129,6 +128,16 @@ function sanitizeAgentName(agentName) {
   while (end > start && normalized[end - 1] === '-') end -= 1;
 
   return normalized.slice(start, end) || 'codex';
+}
+
+function toolErrorMessage(command, err) {
+  if (err?.code === 'ENOENT') {
+    return `${command} not found in PATH`;
+  }
+  if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(err?.message || '')) {
+    return `${command} output exceeded maxBuffer; rerun with a narrower scope or inspect the tool output directly`;
+  }
+  return err?.message || `${command} failed`;
 }
 
 function createSkippedToolResult(reason) {
@@ -459,7 +468,7 @@ async function runSemgrep(rootDir) {
       available: false,
       required: true,
       version: null,
-      error: err.code === 'ENOENT' ? 'semgrep not found in PATH' : err.message,
+      error: toolErrorMessage('semgrep', err),
       findings: [],
       rawCount: 0,
     };
@@ -508,7 +517,7 @@ async function runNpmAudit(rootDir) {
       available: false,
       required: false,
       version: null,
-      error: err.code === 'ENOENT' ? 'npm not found in PATH' : err.message,
+      error: toolErrorMessage('npm', err),
       findings: [],
       rawCount: 0,
     };
@@ -545,7 +554,7 @@ async function runOsvScanner(rootDir) {
       available: false,
       required: false,
       version: null,
-      error: err.code === 'ENOENT' ? 'osv-scanner not found in PATH' : err.message,
+      error: toolErrorMessage('osv-scanner', err),
       findings: [],
       rawCount: 0,
     };
@@ -564,7 +573,7 @@ async function checkToolVersion(command, args = ['--version']) {
     return {
       available: false,
       version: null,
-      error: err.code === 'ENOENT' ? `${command} not found in PATH` : err.message,
+      error: toolErrorMessage(command, err),
     };
   }
 }
@@ -646,7 +655,7 @@ export async function runAnalysis(rootDir, options = {}) {
   }
 
   generateHtmlReport(projectInfo, findings, htmlPath, { toolResults });
-  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults });
+  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults, analysisStartTime: startTime });
 
   const duration = Date.now() - startTime;
 

@@ -15,7 +15,7 @@
     "doctor": "node src/cli.js --doctor"
   },
   "keywords": ["security", "audit", "pentest", "code-review"],
-  "author": "",
+  "author": "decksoftware",
   "license": "MIT",
   "files": [
     "src/",

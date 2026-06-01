@@ -20,6 +20,28 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function safeToken(str, fallback = 'item') {
+  const raw = String(str || '').toLowerCase();
+  let token = '';
+  let lastWasHyphen = false;
+
+  for (const char of raw) {
+    const code = char.charCodeAt(0);
+    const safe = (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || char === '_' || char === '-';
+    if (safe) {
+      token += char;
+      lastWasHyphen = false;
+    } else if (token && !lastWasHyphen) {
+      token += '-';
+      lastWasHyphen = true;
+    }
+  }
+
+  while (token.startsWith('-')) token = token.slice(1);
+  while (token.endsWith('-')) token = token.slice(0, -1);
+  return token || fallback;
+}
+
 function safeJsonForScript(value) {
   return JSON.stringify(value)
     .replace(/</g, '\\u003C')
@@ -202,6 +224,10 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const findingsHtml = findings.map(f => {
     const color = getSeverityColor(f.severity);
     const icon = getCategoryIcon(f.category);
+    const safeId = safeToken(f.id, 'finding');
+    const safeSeverity = safeToken(f.severity, 'info').toUpperCase();
+    const safeConfidence = safeToken(f.confidence || 'medium', 'medium');
+    const filePath = String(f.file || 'unknown');
     const vibeBadge = f.vibeRisk
       ? `<span class="vibe-badge" title="Vibe Coding Risk">⚡ Vibe Coding Risk</span>`
       : '';
@@ -215,16 +241,16 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
     const highlightedFix = highlightCode(escapeHtml(f.fix || ''));
 
     return `
-    <article class="finding-card" data-severity="${f.severity}" data-category="${escapeHtml(f.category)}" data-file="${escapeHtml(f.file)}" id="finding-${f.id}">
+    <article class="finding-card" data-severity="${escapeHtml(safeSeverity)}" data-category="${escapeHtml(f.category)}" data-file="${escapeHtml(filePath)}" id="finding-${escapeHtml(safeId)}">
       <div class="finding-header" onclick="toggleFinding(this)">
         <div class="finding-header-left">
           <span class="finding-id">${escapeHtml(f.id)}</span>
-          <span class="severity-badge" style="background:${color}">${f.severity}</span>
+          <span class="severity-badge" style="background:${color}">${escapeHtml(f.severity)}</span>
           <span class="finding-name">${escapeHtml(f.name)}</span>
           ${vibeBadge}
         </div>
         <div class="finding-header-right">
-          <span class="finding-location">${escapeHtml(f.file.split(/[/\\]/).pop())}:${f.line}</span>
+          <span class="finding-location">${escapeHtml(filePath.split(/[/\\]/).pop())}:${f.line}</span>
           <span class="chevron">▶</span>
         </div>
       </div>
@@ -238,7 +264,7 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
             <div class="meta-item"><span class="meta-label">Category</span><span class="meta-value">${icon} ${escapeHtml(f.category)}</span></div>
             <div class="meta-item"><span class="meta-label">CWE</span>${renderCweMeta(f.cwe)}</div>
             <div class="meta-item"><span class="meta-label">OWASP</span><span class="meta-value">${escapeHtml(f.owasp)}</span></div>
-            <div class="meta-item"><span class="meta-label">Confidence</span><span class="meta-value confidence-${(f.confidence || 'medium').toLowerCase()}">${escapeHtml(f.confidence || 'MEDIUM')}</span></div>
+            <div class="meta-item"><span class="meta-label">Confidence</span><span class="meta-value confidence-${safeConfidence}">${escapeHtml(f.confidence || 'MEDIUM')}</span></div>
             <div class="meta-item"><span class="meta-label">Compliance</span><span class="meta-value">${escapeHtml(f.compliance || 'N/A')}</span></div>
           </div>
           <div class="detail-section">
