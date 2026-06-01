@@ -47,18 +47,51 @@ Security vulnerabilities cost companies billions annually. Most development team
 
 ## Features
 
-### 8-Phase Analysis Pipeline
+### 9-Phase Analysis Pipeline
 
 | Phase | Name | Description |
 |-------|------|-------------|
+| 0 | **Tool Detection** | Detect installed security tools (semgrep, bandit, trivy, snyk, gosec, eslint, codeql, etc.) and use them for real file-by-file scanning |
 | 1 | **Reconnaissance** | Project structure scan, secret detection, external service mapping |
-| 2 | **Ultra-Deep Security** | Injection, auth, data leakage, XSS/CSRF, config, deps, cloud, platform-specific, logic flaws |
-| 3 | **Database Security** | SQL/NoSQL/BaaS structure analysis, access patterns, platform-specific checks |
+| 2 | **Ultra-Deep Security** | Injection, auth, data leakage, XSS/CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws |
+| 3 | **Database Security** | SQL/NoSQL/BaaS structure analysis, Firebase cost & performance, access patterns |
 | 4 | **SLSA 3 Supply Chain** | Source integrity, build integrity, dependency security, deployment security |
 | 5 | **OWASP ASVS** | V1-V14 verification categories (Architecture, Auth, Session, Access, Crypto, etc.) |
 | 6 | **Compliance** | LGPD, GDPR, SOC 2 Type II, HIPAA, CCPA/CPRA regulatory analysis |
 | 7 | **Vibe Coding** | AI-generated code pattern detection, risk scoring, behavioral analysis |
 | 8 | **Report Generation** | HTML (user language) + MD (English for agents) dual report system |
+
+### Analysis Modes
+
+CSReview operates in one of three modes depending on installed tools:
+
+| Mode | Tools Installed | Accuracy | Confidence | Recommended For |
+|------|----------------|----------|------------|-----------------|
+| **Self-Hosted** | All/most tools installed locally | Highest | CONFIRMED/TOOL-ONLY | Production audits, compliance |
+| **Hybrid** | Some tools installed | High | Mixed CONFIRMED + AI-ONLY | Development, CI/CD |
+| **Agent-Only** | No tools installed | Lower | AI-ESTIMATED only | Quick checks, learning |
+
+**Supported Security Tools:**
+| Tool | Purpose | Languages |
+|------|---------|-----------|
+| **Semgrep** | Static analysis (SAST) | 30+ languages |
+| **Bandit** | Python security linter | Python |
+| **Trivy** | Vulnerability + misconfig scanner | All (deps, containers, IaC) |
+| **Snyk** | Dependency vulnerabilities | All |
+| **Gosec** | Go security linter | Go |
+| **ESLint Security** | JS/TS security rules | JavaScript, TypeScript |
+| **CodeQL** | Semantic code analysis | JS, TS, Python, Go, Java, C#, C++ |
+| **pip-audit** | Python dependency audit | Python |
+| **cargo audit** | Rust dependency audit | Rust |
+| **npm audit** | Node.js dependency audit | JavaScript, TypeScript |
+| **dotnet** | .NET dependency audit | C#, .NET |
+| **Checkov** | Infrastructure-as-code security | Terraform, CloudFormation, K8s |
+| **Hadolint** | Dockerfile security | Docker |
+| **Brakeman** | Rails security scanner | Ruby |
+| **Grype** | Container/filesystem vulnerabilities | All |
+| **RetireJS** | JS library vulnerabilities | JavaScript |
+| **Safety** | Python dependency checker | Python |
+| **OWASP Dep-Check** | Dependency vulnerability check | Java, .NET, Node.js |
 
 ### Built-in Code Review System
 

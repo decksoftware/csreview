@@ -86,6 +86,314 @@ This skill is designed to work across multiple AI coding agents:
 
 ## Analysis Phases
 
+### Phase 0: Security Tool Detection & Integration
+
+**This is the FIRST step of every analysis.** CSReview MUST detect which security tools are available on the user's operating system and use them for real file-by-file scanning. When real tools are not available, CSReview falls back to AI-based analysis (which is less thorough).
+
+#### 0.0 Analysis Modes
+
+CSReview operates in one of two modes:
+
+**Mode A: Self-Hosted (RECOMMENDED)**
+- User has security tools installed locally (semgrep, bandit, trivy, snyk, gosec, etc.)
+- CSReview detects and invokes these tools for real file-by-file scanning
+- Results are deterministic, reproducible, and based on rule databases updated regularly
+- Higher confidence in findings - tools use proven detection rules
+- **This is the preferred and recommended mode for production audits**
+
+**Mode B: Agent-Only (FALLBACK)**
+- No security tools installed on the system
+- CSReview uses the AI agent's code understanding capabilities to analyze files
+- The agent reads source files and applies pattern matching for vulnerability detection
+- **WARNING**: This mode depends on the agent's training knowledge and capabilities
+- **RISK**: An agent with limited security knowledge may miss vulnerabilities or produce false positives/negatives
+- **RISK**: Novel or obfuscated attack patterns may not be detected without real tooling
+- **RISK**: Dependency vulnerability checks require a CVE database - AI cannot reliably match all versions to known CVEs
+- Always clearly mark findings as `AI-ESTIMATED` confidence level
+- Always recommend installing real tools for critical security audits
+
+**Mode C: Hybrid (BEST)**
+- Some tools installed, some not
+- CSReview runs available tools AND supplements with AI analysis
+- Tool findings are marked `CONFIRMED` or `TOOL-ONLY`
+- AI-only findings are marked `AI-ONLY` with lower confidence
+- This provides the most comprehensive coverage
+
+**The agent MUST inform the user which mode is active and what the implications are.**
+
+#### 0.1 Tool Detection Protocol
+
+At the start of every scan, run detection commands for each tool. Use `RunCommand` or equivalent:
+
+**Detection Commands:**
+```bash
+# Semgrep - Multi-language static analysis
+semgrep --version
+# If found: semgrep --config auto --json --quiet <project_path>
+
+# Bandit - Python security linter
+bandit --version
+# If found: bandit -r <project_path> -f json -ll
+
+# Trivy - Vulnerability scanner (dependencies, containers, IaC)
+trivy --version
+# If found: trivy fs --format json --output report.json <project_path>
+
+# CodeQL - GitHub's semantic code analysis (if qlpack available)
+codeql version
+# If found: codeql database create / analyze
+
+# ESLint with security plugins
+npx eslint --version 2>/dev/null || eslint --version
+# If found: npx eslint --ext .js,.ts,.jsx,.tsx --config .eslintrc.security.json <project_path>
+
+# Snyk - Dependency vulnerability scanning
+snyk --version
+# If found: snyk test --json > report.json
+
+# SonarQube Scanner
+sonar-scanner --version 2>/dev/null
+# If found: sonar-scanner -Dsonar.projectKey=... -Dsonar.sources=.
+
+# Safety - Python dependency vulnerability checker
+safety --version
+# If found: safety check --json
+
+# Gosec - Go security linter
+gosec --version
+# If found: gosec -fmt json -out report.json ./...
+
+# Grype - Vulnerability scanner for container images and filesystems
+grype version
+# If found: grype dir:<project_path> -o json
+
+# Hadolint - Dockerfile security linter
+hadolint --version
+# If found: hadolint Dockerfile --format json
+
+# TFLint - Terraform linter
+tflint --version
+# If found: tflint --format json
+
+# Checkov - Infrastructure-as-code security
+checkov --version
+# If found: checkov -d <project_path> -o json
+
+# Brakeman - Ruby on Rails security scanner
+brakeman --version
+# If found: brakeman --format json -o report.json
+
+# RetireJS - JavaScript library vulnerability scanner
+retire --version
+# If found: retire --path <project_path> --outputformat json
+
+# OWASP Dependency-Check
+dependency-check.sh --version 2>/dev/null || dependency-check --version 2>/dev/null
+# If found: dependency-check --project <name> --scan <path> --format JSON
+
+# pip-audit - Python dependency auditing
+pip-audit --version
+# If found: pip-audit --format json
+
+# cargo-audit - Rust dependency auditing
+cargo audit --version
+# If found: cargo audit --json
+
+# npm audit (always available with npm)
+npm --version
+# If found: npm audit --json
+
+# yarn audit
+yarn --version
+# If found: yarn audit --json
+
+# pip-audit for Python
+pip-audit --version
+# If found: pip-audit --format json
+
+# dotnet list package --vulnerable (always available with dotnet)
+dotnet --version
+# If found: dotnet list package --vulnerable --include-transitive
+```
+
+#### 0.2 Tool Selection Matrix
+
+After detection, select tools based on detected project languages:
+
+| Language/Framework | Primary Tools | Secondary Tools |
+|-------------------|---------------|-----------------|
+| **JavaScript/TypeScript** | eslint (security), npm audit, snyk | retire, semgrep |
+| **Python** | bandit, safety, pip-audit | semgrep, snyk |
+| **Go** | gosec, govulncheck, trivy | semgrep |
+| **C# / .NET** | dotnet list package --vulnerable | semgrep, snyk |
+| **Java** | semgrep, snyk, OWASP dep-check | trivy |
+| **Ruby** | brakeman, bundler-audit | semgrep |
+| **Rust** | cargo audit | semgrep, trivy |
+| **PHP** | semgrep, snyk | psalm (security) |
+| **Kotlin/Swift** | semgrep, snyk | trivy |
+| **Docker** | hadolint, trivy, grype | checkov |
+| **Terraform/IaC** | checkov, tflint, trivy | semgrep |
+| **Delphi/Lazarus** | AI-based analysis only | semgrep (if available) |
+| **Multi-language** | semgrep, trivy | snyk, grype |
+
+#### 0.3 Execution Strategy
+
+**When real tools ARE available:**
+1. Run all applicable tools in parallel (use `RunCommand` with `blocking: false` for each)
+2. Collect JSON output from each tool
+3. Parse and normalize findings into unified format
+4. Merge with AI-based analysis (Phase 1-7) for comprehensive coverage
+5. Deduplicate findings (same file+line+type = same issue)
+6. Prioritize: tool findings take precedence over AI-only findings
+
+**When real tools are NOT available:**
+1. Inform the user: "No security scanning tools detected. Using AI-based analysis only. For better accuracy, install: [recommended tools for their stack]"
+2. Run AI-based analysis (Phase 1-7) with enhanced depth
+3. Add a disclaimer to reports: "This report was generated using AI-based analysis only. For production security audits, install and run: semgrep, [language-specific tool]"
+4. Still generate both HTML and MD reports, but mark findings with confidence level
+
+**Confidence Levels:**
+| Level | Source | Description |
+|-------|--------|-------------|
+| **CONFIRMED** | Real tool + AI agree | Highest confidence - both tool and AI identified the issue |
+| **TOOL-ONLY** | Real tool only | Issue found by tool but not confirmed by AI review |
+| **AI-ONLY** | AI analysis only | Issue found by AI but not detected by tools |
+| **AI-ESTIMATED** | No tools available | AI-based analysis only, lower confidence |
+
+#### 0.4 Tool Output Normalization
+
+Each tool's output must be normalized into this unified format:
+
+```json
+{
+  "source": "semgrep|bandit|trivy|snyk|eslint|codeql|gosec|...",
+  "id": "unique-finding-id",
+  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
+  "category": "injection|xss|auth|config|dependency|...",
+  "file": "relative/path/to/file",
+  "line": 42,
+  "column": 10,
+  "title": "Short description",
+  "description": "Detailed description",
+  "cwe": "CWE-89",
+  "confidence": "CONFIRMED|TOOL-ONLY|AI-ONLY|AI-ESTIMATED",
+  "fix": "Suggested fix or remediation",
+  "references": ["url1", "url2"],
+  "tool_metadata": {
+    "rule_id": "semgrep-rule-id",
+    "owasp_category": "A03:2021",
+    "cve": "CVE-2024-XXXX"
+  }
+}
+```
+
+#### 0.5 Per-Tool Invocation Details
+
+**Semgrep (highest priority - multi-language):**
+```bash
+# Auto-detect rules from registry
+semgrep --config auto --json --quiet --no-git-ignore <project_path>
+
+# With specific rulesets
+semgrep --config p/security-audit --config p/secrets --config p/owasp-top-ten --json <project_path>
+```
+
+**Bandit (Python-specific):**
+```bash
+bandit -r <project_path> -f json -ll -i --skip B101
+# -ll = medium and high severity only
+# --skip B101 = skip assert warnings (too noisy)
+```
+
+**Trivy (comprehensive scanner):**
+```bash
+# Filesystem scan (dependencies + misconfigs)
+trivy fs --format json --scanners vuln,misconfig,secret <project_path>
+
+# With severity filter
+trivy fs --severity HIGH,CRITICAL --format json <project_path>
+```
+
+**npm audit (Node.js dependencies):**
+```bash
+cd <project_path> && npm audit --json
+```
+
+**Snyk (if authenticated):**
+```bash
+snyk test --json --severity-threshold=medium
+```
+
+**Gosec (Go-specific):**
+```bash
+gosec -fmt json -out /tmp/gosec-report.json -severity medium ./...
+```
+
+**dotnet (C#/.NET dependencies):**
+```bash
+dotnet list package --vulnerable --include-transitive
+```
+
+**cargo audit (Rust):**
+```bash
+cargo audit --json
+```
+
+**pip-audit (Python dependencies):**
+```bash
+pip-audit --format json --desc
+```
+
+**Checkov (IaC security):**
+```bash
+checkov -d <project_path> -o json --quiet --compact
+```
+
+**Hadolint (Dockerfile):**
+```bash
+hadolint <project_path>/Dockerfile --format json
+```
+
+#### 0.6 Installation Recommendations
+
+When tools are missing, provide platform-specific installation instructions:
+
+```bash
+# Semgrep (all platforms)
+pip install semgrep
+
+# Bandit (Python)
+pip install bandit
+
+# Trivy (all platforms)
+# Windows: choco install trivy OR scoop install trivy
+# macOS: brew install trivy
+# Linux: sudo apt-get install trivy OR curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+
+# Snyk
+npm install -g snyk
+
+# Gosec (Go)
+go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+# pip-audit
+pip install pip-audit
+
+# cargo audit
+cargo install cargo-audit
+
+# Checkov
+pip install checkov
+
+# Hadolint
+# Windows: choco install hadolint
+# macOS: brew install hadolint
+# Linux: docker pull hadolint/hadolint
+
+# ESLint Security Plugin
+npm install --save-dev eslint-plugin-security eslint-plugin-no-unsanitized
+```
+
 ### Phase 1: Reconnaissance & Mapping
 
 1. **Project Structure Scan**
@@ -1403,24 +1711,29 @@ When CSReview is invoked, it can operate in any of these modes:
 When invoked, follow these steps:
 
 1. **Announce the scan**: Inform user about starting security analysis
-2. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
-3. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, platform-specific, logic flaws)
-4. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, and configurations
-5. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
-6. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
-7. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
-8. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
-9. **Progress updates**: Keep user informed of analysis progress throughout
-10. **Phase 8 - Report Generation**: Create BOTH reports:
+2. **Phase 0 - Tool Detection**: Detect installed security tools (semgrep, bandit, trivy, snyk, gosec, eslint, codeql, etc.). Report which tools are available and which are missing. Run all available tools against the project. Normalize tool output into unified findings format.
+3. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
+4. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws)
+5. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, Firebase cost/performance, and configurations
+6. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
+7. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
+8. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
+9. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
+10. **Progress updates**: Keep user informed of analysis progress throughout
+11. **Phase 8 - Report Generation**: Create BOTH reports:
     - `security-report.html` (visual report in user's language for human review)
     - `security-findings.md` (structured report in English for AI agent fixes)
-11. **Deliver reports**: Provide paths to both generated files
-12. **Summary**: Give brief verbal summary of critical/high findings including compliance gaps and vibe coding risks
-13. **Offer auto-fix**: Ask if user wants agent to automatically fix findings using the MD report
+12. **Deliver reports**: Provide paths to both generated files
+13. **Summary**: Give brief verbal summary of critical/high findings including tool-detected vs AI-estimated findings, compliance gaps, vibe coding risks, and Firebase cost issues
+14. **Offer auto-fix**: Ask if user wants agent to automatically fix findings using the MD report
 
 ## Important Guidelines
 
 - **READ-ONLY**: CSReview NEVER modifies, deletes, or moves any files in the analyzed project. It only identifies, reports, and suggests fixes.
+- **Tool Detection First**: ALWAYS run Phase 0 (tool detection) before any analysis. The user must know which mode is active.
+- **Agent-Only Risk Disclosure**: When operating in Agent-Only mode, the agent MUST explicitly warn the user that findings have lower confidence and that real security tools should be installed for production audits. A less knowledgeable agent may miss critical vulnerabilities or produce incorrect recommendations.
+- **Self-Hosted Recommendation**: Always recommend installing at least `semgrep` (universal) and the language-specific primary tool for the project being analyzed. Provide installation commands.
+- **All Files Must Be Scanned**: When tools are available, ALL source files in the project MUST be scanned. When in Agent-Only mode, the agent MUST read and analyze every relevant source file - do not skip files or use sampling.
 - **Never expose secrets in chat**: If you find hardcoded credentials, mention them in the reports only, not in the conversation
 - **Be thorough but practical**: Focus on exploitable vulnerabilities, not theoretical edge cases
 - **Provide actionable fixes**: Every finding must include a concrete solution with corrected code, but the fix is applied by the human developer or coding agent, not by CSReview
