@@ -84,6 +84,11 @@ CSReview includes a complete code review system - no additional skills or plugin
 | **Dependencies** | CVEs, Supply chain, Typosquatting, License compliance |
 | **Cloud/Backend** | Supabase (RLS, Storage), Firebase (Rules, Auth), Appwrite, Neon, PocketBase, Convex |
 | **Database Security** | PostgreSQL, MySQL, MariaDB, SQL Server, Firebird, SQLite, Oracle, MongoDB, Redis, CouchDB, DynamoDB, Cassandra |
+| **Cost Analysis** | Firebase Firestore/RTDB/Storage/Functions cost estimation, unbounded query detection, trigger cost analysis |
+| **.NET** | ASP.NET Core, Blazor, EF Core, NuGet security, assembly signing, BinaryFormatter |
+| **Delphi/Lazarus** | VCL, FMX, LCL, FireDAC, dbExpress, IBX, FIBPlus, zeoslib, Firebird connectivity |
+| **Go** | Gin, Echo, Fiber, GORM, govulncheck, CGo boundary, unsafe.Pointer |
+| **Binary/Installer** | DLL hijacking, ASLR/DEP, code signing, Inno Setup, NSIS, WiX, MSI, Authenticode |
 | **Platform-Specific** | macOS, iOS, Linux, Windows native vulnerabilities |
 | **System-Level** | Path traversal, Symlinks, IPC, Memory corruption, TOCTOU |
 | **Business Logic** | Race conditions, Mass assignment, Deserialization flaws |
@@ -99,6 +104,15 @@ CSReview includes a complete code review system - no additional skills or plugin
 - **Backend**: Python, Node.js, C#, Go, Java, PHP, Ruby
 - **Systems**: C, C++, Rust
 - **Desktop**: Electron, Tauri, native apps
+- **.NET Ecosystem**: .NET Framework, .NET Core, .NET 5/6/7/8/9, ASP.NET Core, Blazor, MAUI, WPF, WinForms, Xamarin
+- **Delphi/Lazarus**: Delphi (VCL, FMX), Lazarus (LCL), Free Pascal, Object Pascal
+- **Go**: Go standard library, Gin, Echo, Fiber, GORM, and Go modules
+
+#### Installer & Binary Security
+- **DLL Analysis**: DLL hijacking, side-loading, missing ASLR/DEP, unsigned DLLs
+- **Installers**: Inno Setup, NSIS, WiX, InstallShield, MSI packages
+- **Binary Security**: Code signing, Authenticode, checksum integrity
+- **Package Formats**: NuGet, Chocolatey, WinGet, DEB, RPM, APK, IPA, DMG
 
 #### Databases & Backends
 - **SQL**: PostgreSQL, MySQL, MariaDB, SQL Server, Firebird, SQLite, Oracle

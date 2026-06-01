@@ -44,6 +44,15 @@ CSReview includes built-in **Code Review** capabilities (equivalent to codex:rev
 - **Backend**: Python, Node.js, C#, Go, Java, PHP, Ruby
 - **Systems**: C, C++, Rust
 - **Desktop**: Electron, Tauri, native apps
+- **.NET Ecosystem**: .NET Framework, .NET Core, .NET 5/6/7/8/9, ASP.NET Core, Blazor, MAUI, WPF, WinForms, Xamarin
+- **Delphi/Lazarus**: Delphi (VCL, FMX), Lazarus (LCL), Free Pascal, Object Pascal
+- **Go**: Go standard library, Gin, Echo, Fiber, GORM, and Go modules
+
+### Installer & Binary Security
+- **DLL Analysis**: DLL hijacking, side-loading, missing ASLR/DEP, unsigned DLLs, export table inspection
+- **Installers**: Inno Setup, NSIS, WiX, InstallShield, MSI packages, custom installers
+- **Binary Security**: Code signing verification, Authenticode, checksum integrity, obfuscation review
+- **Package Formats**: NuGet (.nupkg), Chocolatey, WinGet, DEB, RPM, APK, IPA, DMG
 
 ### Databases & Backends
 - **SQL**: PostgreSQL, MySQL, MariaDB, SQL Server, Firebird, SQLite, Oracle
@@ -211,7 +220,145 @@ This skill is designed to work across multiple AI coding agents:
 - **IPC Insecurity**: Unprotected inter-process communication
 - **Credential Storage**: Plaintext passwords, tokens, keys
 
-#### 2.10 Logic & Business Flaws
+#### 2.10 .NET / dotnet Security
+
+**ASP.NET Core / Blazor:**
+- Missing `[Authorize]` attributes on controllers/pages
+- CORS policy set to `AllowAnyOrigin` in production
+- Missing anti-forgery tokens (`[ValidateAntiForgeryToken]`)
+- Insecure cookie configuration (missing HttpOnly, Secure, SameSite)
+- Sensitive data in `appsettings.json` without user secrets or key vault
+- Missing rate limiting middleware
+- Debug mode enabled in production (`ASPNETCORE_ENVIRONMENT=Development`)
+- Missing HTTPS redirection and HSTS
+- Insecure Data Protection API key storage
+- Missing input validation with `[ValidateInput]` or FluentValidation
+
+**Entity Framework / EF Core:**
+- Raw SQL queries with string interpolation (`FromSqlRaw` with unsanitized input)
+- Missing parameterization in LINQ-to-SQL dynamic queries
+- Lazy loading without `ProxyCreationEnabled` control (N+1 queries)
+- Excessive `Include()` chains loading unnecessary related data
+- Missing migration rollback scripts
+- Connection strings with credentials in plain text
+- Missing database connection encryption
+
+**NuGet / Package Security:**
+- Packages from untrusted sources
+- Missing `nuget.config` source restrictions
+- Packages with known vulnerabilities (check against CVE database)
+- Transitive dependency vulnerabilities
+- Missing lock files (`packages.lock.json`)
+
+**.NET Binary Security:**
+- Missing strong naming / signing of assemblies
+- `AllowPartiallyTrustedCallers` attribute misuse
+- Missing `[SecurityCritical]` / `[SecuritySafeCritical]` boundaries
+- Reflection-based type loading from untrusted sources
+- BinaryFormatter / SoapFormatter deserialization (known insecure)
+- Missing `SecureString` usage for sensitive data in memory
+
+#### 2.11 Delphi / Lazarus Security
+
+**Delphi (VCL / FireMonkey):**
+- Hardcoded database credentials in `.dpr` or `.pas` files
+- Missing encryption for stored connection strings
+- BDE (Borland Database Engine) insecure configurations
+- dbExpress / FireDAC connection strings with plaintext passwords
+- Insecure file operations (no path validation on user input)
+- Missing input validation on TForm controls
+- COM automation with late binding (variant-based) without safety checks
+- Unsafe pointer operations and untyped `var` parameters
+- Missing bounds checking on dynamic arrays and strings (`{$RANGECHECKS ON}`)
+- Insecure registry operations (direct Windows Registry access without validation)
+- Missing overflow checking (`{$OVERFLOWCHECKS ON}`)
+
+**Lazarus / Free Pascal:**
+- Hardcoded credentials in `.lpr` or `.pas` source files
+- SQLite databases without encryption (SQLite3 without SEE or sqlcipher)
+- Missing parameterized queries in SQLdb components
+- Insecure INI file configurations with sensitive data
+- Missing TLS for network communications (Indy / Synapse without SSL)
+- Form data stored without encryption
+- Insecure file permissions on Linux deployments
+- Missing `{$MODESWITCH ANSISTRINGS}` causing string handling issues
+- Buffer overflows in `Move`, `FillChar`, `GetMem` operations
+- Missing exception handling around database operations
+
+**Database Connectivity (Delphi/Lazarus):**
+- Firebird/InterBase connection strings with embedded passwords
+- Missing SSL/TLS for database connections
+- Unencrypted `.fdb` / `.gdb` database files
+- IBX / FIBPlus components with default credentials
+- Missing `EXECUTE STATEMENT` parameterization in Firebird PSQL
+- zeoslib connection pooling misconfigurations
+
+#### 2.12 Go Security
+
+**Web Frameworks (Gin, Echo, Fiber):**
+- Missing input validation middleware
+- SQL injection via `fmt.Sprintf` in queries instead of parameterized statements
+- Missing CSRF protection
+- Unbounded file uploads without size/type validation
+- Missing rate limiting
+- CORS middleware with `AllowAllOrigins: true`
+- Missing request body size limits
+- Error messages leaking internal state
+
+**Go-Specific Vulnerabilities:**
+- `exec.Command` with unsanitized user input
+- `os.ReadFile` / `ioutil.ReadFile` with user-controlled paths (path traversal)
+- `template.HTML` bypassing auto-escaping
+- `unsafe.Pointer` usage and CGo boundary vulnerabilities
+- Missing bounds checking in slice operations
+- Goroutine leaks (missing context cancellation)
+- Race conditions from shared mutable state without `sync.Mutex`
+- `json.Unmarshal` into `interface{}` without schema validation
+- Missing `context.WithTimeout` for external service calls
+- Hardcoded credentials in source code
+
+**Go Modules:**
+- `go.sum` integrity verification failures
+- Replaced modules (`replace` directive) pointing to untrusted sources
+- Missing `go.sum` file in repository
+- Modules with known vulnerabilities (`govulncheck`)
+- Private module proxy misconfigurations
+
+#### 2.13 Installer & DLL Security
+
+**DLL Security:**
+- DLL hijacking: application loads DLL from current directory before system paths
+- DLL side-loading: legitimate app loading malicious DLL from same directory
+- Missing Address Space Layout Randomization (ASLR) flag
+- Missing Data Execution Prevention (DEP) / NX bit flag
+- Unsigned DLLs in production deployments
+- Export table exposing sensitive functions
+- DLL injection vectors (missing process integrity levels)
+- Insecure DLL search order (current directory before System32)
+
+**Installer Security (Inno Setup / NSIS / WiX / MSI):**
+- Custom actions running with elevated privileges
+- Missing digital signature on installer executable
+- Insecure file permissions set during installation
+- Hardcoded credentials in installer scripts
+- Missing uninstall cleanup (leftover sensitive files/registry keys)
+- Insecure temporary directory usage during installation
+- Missing integrity checks on extracted files
+- Pre-install validation missing (disk space, prerequisites)
+- Insecure custom protocol handlers registered during install
+- MSI custom actions with `Impersonate="no"` (running as SYSTEM)
+
+**Binary & Executable Security:**
+- Missing Authenticode / code signing
+- Missing checksum verification for downloaded updates
+- Insecure auto-update mechanism (HTTP instead of HTTPS, no signature verification)
+- Debug symbols included in release builds
+- PDB files deployed to production
+- Sensitive strings embedded in binary (use string search analysis)
+- Missing compiler security flags (`/GS` buffer security check, `/DYNAMICBASE`, `/NXCOMPAT`)
+- Insecure compiler optimizations that remove security checks
+
+#### 2.14 Logic & Business Flaws
 - **Race Conditions**: Concurrent request exploitation
 - **TOCTOU**: Time-of-check to time-of-use vulnerabilities
 - **Business Logic Bypass**: Skipping payment, validation bypass
@@ -318,6 +465,77 @@ Deep analysis of database structures, configurations, and access patterns across
 - Cloud Functions without authentication
 - Missing security rules for subcollections
 - Realtime Database rules too permissive
+
+**Firebase Cost & Performance Security:**
+
+*Rule-Based Cost Detection:*
+- Firestore rules with `allow read, write: if true;` (unlimited reads/writes = cost explosion)
+- Firestore rules with `allow read: if request.auth != null;` (any authenticated user can read ALL documents)
+- Realtime Database rules with `.read: true` or `.write: true` at root level
+- Storage rules allowing unlimited file uploads without size/type restrictions
+- Missing `request.resource.size` limits in Firestore create/update rules
+- Rules that allow listing entire collections without filters (`allow list` without `request.query.limit`)
+
+*Query Cost Analysis:*
+- `getDocs(collection(db, "collection"))` without pagination (reads entire collection)
+- `getDocs(query(collection(db, "collection")))` without `.limit()` clause
+- Missing cursor-based pagination (`startAfter`, `startAt`, `endBefore`, `endAt`)
+- Realtime Database `ref.once('value')` on root or large nodes
+- Excessive snapshot listeners (`onSnapshot`) without proper unsubscribe
+- Multiple concurrent `getDoc()` calls instead of batched reads or `getAll()`
+- `getDocs()` inside loops (N+1 query pattern in Firestore)
+- Missing field selection (reading entire documents when only few fields needed)
+- Collection group queries without security rules covering all subcollections
+
+*Cloud Functions Cost Triggers:*
+- Firestore `onWrite`/`onCreate` triggers on high-write collections (each trigger = function invocation cost)
+- Storage `onArchive`/`onDelete` triggers without event filtering
+- HTTP functions without rate limiting (vulnerable to DDoS = cost spike)
+- Scheduled functions running too frequently without purpose
+- Functions with excessive memory allocation (always using 2GB when 256MB suffices)
+- Missing `minInstances: 0` (keeping instances alive when not needed)
+- `onRequest` functions without timeout configuration
+- Functions that perform unnecessary reads before writes
+- Recursive trigger patterns (function writes to same collection that triggers it)
+
+*Realtime Database Cost Patterns:*
+- Deep listeners on root node (`ref.on('value')` at `/`)
+- Missing `.indexOn` rules causing full database scans for queries
+- Large JSON structures stored as single nodes instead of distributed paths
+- Missing disconnect handlers leaving stale data
+- Excessive `ref.set()` calls instead of batched `ref.update()`
+- Not using `ref.once()` when real-time updates aren't needed
+
+*Storage Cost Patterns:*
+- Missing file compression before upload (uploading uncompressed images/videos)
+- No upload size limits enforced client-side AND server-side
+- Missing file cleanup on account/document deletion
+- Using `uploadBytes` instead of `uploadBytesResumable` for large files (memory spikes)
+- Missing Firebase App Check for Storage (unauthorized uploads = cost)
+- Not using CDN caching headers for public files (repeated downloads = cost)
+- Missing lifecycle rules for old/deleted files
+
+*Firestore Index Cost:*
+- Missing composite indexes causing query failures or full scans
+- Over-indexing (indexes on fields rarely queried = unnecessary write cost)
+- Single-field index exemptions not configured for high-write fields
+- Array-contains queries on large arrays (index size bloat)
+
+*Connection & Instance Cost:*
+- Excessive simultaneous Realtime Database connections (free tier: 100, paid: billed per connection)
+- Firestore listeners not properly cleaned up on component unmount
+- Missing offline persistence configuration causing reconnection storms
+- Multiple Firebase app instances initialized unnecessarily
+- Not using `firebase-admin` batch operations for bulk writes (individual writes = more cost)
+- Missing connection pooling for server-side Firebase Admin SDK
+
+*Cost Estimation Patterns:*
+- Estimate monthly read/write/delete costs based on code patterns
+- Identify potential infinite loops in Firestore triggers
+- Detect patterns where a single user action triggers N database operations
+- Flag unbounded queries that could read millions of documents
+- Calculate projected storage growth without cleanup policies
+- Identify missing budget alerts and spending limits configuration
 
 **Appwrite:**
 - Collection permissions set to `any` (public)
@@ -744,6 +962,16 @@ For each vulnerability found:
       <!-- SQL database findings -->
       <!-- NoSQL database findings -->
       <!-- BaaS platform findings -->
+      <!-- Firebase cost & performance findings with cost impact estimates -->
+      <!-- .NET / Delphi / Go / Binary security findings -->
+    </section>
+
+    <section id="cost-analysis">
+      <!-- Firebase/BaaS cost estimation based on code patterns -->
+      <!-- Projected monthly spend based on detected patterns -->
+      <!-- Cost optimization recommendations -->
+      <!-- Unbounded query warnings -->
+      <!-- Missing rate limit impact analysis -->
     </section>
 
     <section id="compliance-matrix">
@@ -758,6 +986,14 @@ For each vulnerability found:
       <!-- AI-generated code risk assessment -->
       <!-- Pattern distribution chart -->
       <!-- Recommendations for vibe coding users -->
+    </section>
+
+    <section id="platform-specific">
+      <!-- .NET / ASP.NET security findings -->
+      <!-- Delphi / Lazarus security findings -->
+      <!-- Go security findings -->
+      <!-- DLL / Installer security findings -->
+      <!-- Binary security findings -->
     </section>
   </main>
 
@@ -874,6 +1110,24 @@ const result = await db.query(query, [email, password]);
 | ID | Severity | Platform | Config | Issue | Recommendation |
 |----|----------|----------|--------|-------|----------------|
 | BAAS001 | CRITICAL | Supabase | supabase/config.ts:5 | Service role key in client code | Move to server-side environment |
+
+### Firebase Cost & Performance Issues
+| ID | Severity | Category | File | Issue | Cost Impact | Recommendation |
+|----|----------|----------|------|-------|-------------|----------------|
+| COST001 | CRITICAL | Firestore Rules | firestore.rules:12 | `allow read, write: if true;` | Unlimited reads/writes = cost explosion | Restrict to authenticated users with resource-level checks |
+| COST002 | HIGH | Query | src/hooks/useUsers.ts:23 | `getDocs(collection(db, "users"))` without pagination | Reads entire collection | Add `.limit()` and cursor-based pagination |
+| COST003 | HIGH | Cloud Functions | functions/src/index.ts:45 | `onWrite` trigger on high-write collection | Each write = function invocation cost | Filter events or use batch processing |
+| COST004 | MEDIUM | Storage | src/utils/upload.ts:15 | No file size limit before upload | Large files = storage + bandwidth cost | Add client-side + server-side size validation |
+| COST005 | MEDIUM | Realtime DB | src/App.tsx:30 | `ref.on('value')` on root node | Downloads entire database on every change | Listen to specific paths only |
+| COST006 | LOW | Connections | src/context/Auth.tsx:10 | Multiple `onSnapshot` listeners without cleanup | Billed per connection | Unsubscribe on component unmount |
+
+### .NET / Delphi / Go / Binary Security Issues
+| ID | Severity | Category | File | Issue | Recommendation |
+|----|----------|----------|------|-------|----------------|
+| DOTNET001 | HIGH | ASP.NET | Controllers/AdminController.cs:15 | Missing `[Authorize]` attribute | Add authorization attribute |
+| DELPHI001 | CRITICAL | Database | Unit1.pas:45 | Hardcoded Firebird credentials | Use encrypted connection string storage |
+| GO001 | HIGH | Web | main.go:67 | SQL injection via `fmt.Sprintf` | Use parameterized queries with `db.Query` |
+| DLL001 | MEDIUM | Binary | installer/setup.iss:23 | Missing digital signature | Sign installer with Authenticode certificate |
 
 ---
 
