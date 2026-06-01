@@ -8,7 +8,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "doctor": "node src/cli.js --doctor"
   },
   "keywords": ["security", "audit", "pentest", "code-review"],
   "author": "",
@@ -22,5 +23,42 @@
   "dependencies": {
     "chalk": "^5.3.0",
     "glob": "^11.0.0"
+  },
+  "csreview": {
+    "requiredExternalTools": [
+      {
+        "name": "semgrep",
+        "purpose": "multi-language static application security testing",
+        "required": true,
+        "install": [
+          "pipx install semgrep",
+          "uv tool install semgrep",
+          "brew install semgrep"
+        ],
+        "verify": "semgrep --version"
+      }
+    ],
+    "recommendedExternalTools": [
+      {
+        "name": "osv-scanner",
+        "purpose": "multi-ecosystem dependency vulnerability scanning",
+        "required": false,
+        "install": [
+          "winget install Google.OSVScanner",
+          "brew install osv-scanner",
+          "go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest"
+        ],
+        "verify": "osv-scanner --version"
+      },
+      {
+        "name": "npm audit",
+        "purpose": "Node.js dependency vulnerability scanning",
+        "required": false,
+        "install": [
+          "Install Node.js/npm"
+        ],
+        "verify": "npm --version"
+      }
+    ]
   }
 }

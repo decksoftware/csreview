@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { detectSecrets, detectVulnerabilities } from '../src/detector.js';
-import { runAnalysis } from '../src/index.js';
+import {
+  normalizeNpmAuditFindings,
+  normalizeOsvScannerFindings,
+  runAnalysis,
+} from '../src/index.js';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
@@ -67,4 +71,88 @@ test('detector completes on regex-heavy JavaScript files', () => {
 
   assert.ok(Array.isArray(findings));
   assert.ok(Date.now() - startedAt < 2000);
+});
+
+test('package metadata declares Semgrep as a required external tool', () => {
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const requiredTools = pkg.csreview?.requiredExternalTools || [];
+  const recommendedTools = pkg.csreview?.recommendedExternalTools || [];
+  const semgrep = requiredTools.find(tool => tool.name === 'semgrep');
+  const osvScanner = recommendedTools.find(tool => tool.name === 'osv-scanner');
+
+  assert.equal(semgrep?.required, true);
+  assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
+  assert.equal(semgrep.verify, 'semgrep --version');
+  assert.equal(osvScanner?.purpose, 'multi-ecosystem dependency vulnerability scanning');
+});
+
+test('skill requires external research when framework or security context is uncertain', () => {
+  const skill = fs.readFileSync('SKILL.md', 'utf8');
+
+  assert.match(skill, /External Research Protocol/);
+  assert.match(skill, /official framework documentation/);
+  assert.match(skill, /OWASP|CWE|CVE|vendor security advisory/);
+  assert.match(skill, /Do not guess/i);
+});
+
+test('normalizes npm audit output into read-only dependency findings', () => {
+  const findings = normalizeNpmAuditFindings({
+    vulnerabilities: {
+      lodash: {
+        name: 'lodash',
+        severity: 'high',
+        isDirect: true,
+        via: [{
+          title: 'Prototype Pollution in lodash',
+          cwe: ['CWE-1321'],
+          url: 'https://github.com/advisories/GHSA-test',
+        }],
+        range: '<4.17.21',
+        nodes: ['node_modules/lodash'],
+        fixAvailable: { name: 'lodash', version: '4.17.21', isSemVerMajor: false },
+      },
+    },
+  });
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].source, 'npm-audit');
+  assert.equal(findings[0].severity, 'HIGH');
+  assert.equal(findings[0].cwe, 'CWE-1321');
+  assert.match(findings[0].fix, /Review lodash/);
+  assert.doesNotMatch(findings[0].fix, /npm audit fix/i);
+});
+
+test('normalizes OSV-Scanner output into dependency findings', () => {
+  const root = path.resolve('.');
+  const findings = normalizeOsvScannerFindings({
+    results: [{
+      source: {
+        path: path.join(root, 'package-lock.json'),
+        type: 'lockfile',
+      },
+      packages: [{
+        package: {
+          name: 'debug',
+          version: '2.6.8',
+          ecosystem: 'npm',
+        },
+        vulnerabilities: [{
+          id: 'GHSA-test',
+          aliases: ['CVE-2099-0001'],
+          summary: 'debug has a denial of service vulnerability',
+          database_specific: { severity: 'HIGH' },
+          references: [{ url: 'https://osv.dev/GHSA-test' }],
+          affected: [{
+            ranges: [{ events: [{ fixed: '2.6.9' }] }],
+          }],
+        }],
+      }],
+    }],
+  }, root);
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].source, 'osv-scanner');
+  assert.equal(findings[0].file, 'package-lock.json');
+  assert.equal(findings[0].severity, 'HIGH');
+  assert.match(findings[0].fix, /2\.6\.9/);
 });

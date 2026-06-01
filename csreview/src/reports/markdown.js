@@ -497,16 +497,29 @@ function buildToolMetadata(toolResults) {
   }
 
   const semgrep = toolResults.semgrep || {};
+  const npmAudit = toolResults.npmAudit || {};
+  const osvScanner = toolResults.osvScanner || {};
   const semgrepStatus = semgrep.available
     ? `available (${semgrep.version || 'version unknown'}), ${semgrep.rawCount || semgrep.findings?.length || 0} findings`
     : `not available${semgrep.error ? ` (${semgrep.error})` : ''}`;
+  const npmAuditStatus = npmAudit.available
+    ? `available (${npmAudit.version || 'version unknown'}), ${npmAudit.rawCount || npmAudit.findings?.length || 0} findings`
+    : `not run${npmAudit.reason ? ` (${npmAudit.reason})` : npmAudit.error ? ` (${npmAudit.error})` : ''}`;
+  const osvScannerStatus = osvScanner.available
+    ? `available (${osvScanner.version || 'version unknown'}), ${osvScanner.rawCount || osvScanner.findings?.length || 0} findings`
+    : `not available${osvScanner.error ? ` (${osvScanner.error})` : ''}`;
   const semgrepInstall = semgrep.available
     ? ''
-    : '\n- **Install Semgrep**: `pip install semgrep` or `pipx install semgrep`, then verify with `semgrep --version`';
+    : '\n- **Install Semgrep**: `pipx install semgrep`, `uv tool install semgrep`, or `brew install semgrep`, then verify with `semgrep --version`';
+  const osvInstall = osvScanner.available
+    ? ''
+    : '\n- **Install OSV-Scanner**: `winget install Google.OSVScanner`, `brew install osv-scanner`, or `go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest`, then verify with `osv-scanner --version`';
 
   return `- **Analysis Mode**: ${toolResults.mode || 'Agent-Only'}
 - **Semgrep Required**: Yes
-- **Semgrep Status**: ${semgrepStatus}${semgrepInstall}`;
+- **Semgrep Status**: ${semgrepStatus}
+- **npm audit Status**: ${npmAuditStatus}
+- **OSV-Scanner Status**: ${osvScannerStatus}${semgrepInstall}${osvInstall}`;
 }
 
 function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {

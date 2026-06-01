@@ -14,7 +14,18 @@ This skill performs ultra-deep security analysis (automated pentest level) on co
 
 **CSReview is READ-ONLY**: It never modifies, deletes, moves, or creates source code in the analyzed project. It only identifies problems, locates them precisely, and suggests remediation approaches based on the frameworks and technologies in use. The actual fixes are applied later by the human developer or a coding agent after understanding the project context, schema, tests, and regression risk. When encountering unfamiliar frameworks, CSReview researches official documentation and community forums to provide accurate recommendations.
 
-**Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions. Framework-native lint/scanning tools such as ESLint security plugins, npm audit, Bandit, pip-audit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL should be executed when relevant to the detected stack.
+**Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. Semgrep is a required external CLI tool, not a normal bundled npm dependency; install it with `pipx install semgrep`, `uv tool install semgrep`, Homebrew, Docker, or the platform package manager. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions.
+
+**Dependency SCA complements Semgrep**: when available, CSReview MUST also run read-only dependency scanners such as `npm audit --json` for Node.js projects and `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL should be executed when relevant to the detected stack.
+
+**External Research Protocol**: Do not guess when framework behavior, configuration defaults, security controls, exploitability, dependency advisories, CVE details, or remediation guidance are uncertain. The coding agent MUST know how to perform external internet research when necessary and MUST consult primary or specialized sources before reporting a confident recommendation:
+
+- official framework documentation, release notes, migration guides, and security pages
+- Vendor security advisory pages for the affected product, cloud service, database, BaaS, or package manager
+- OWASP, CWE, CVE/NVD, GitHub Security Advisories, OSV.dev, Snyk advisory pages, and other specialized application security portals
+- Official package, API, or SDK documentation for the exact version or major version in use
+
+When external research is used, include source names and URLs in the finding references. Prefer official documentation and vendor advisories over generic blog posts. If sources disagree or the version cannot be confirmed, mark the finding as lower confidence and explain the uncertainty in the report.
 
 The analysis covers 8 phases: Reconnaissance, Ultra-Deep Security, Database Security, SLSA 3 Supply Chain, OWASP ASVS, Compliance (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA), Vibe Coding Protection, and Dual Report Generation.
 
@@ -133,6 +144,10 @@ At the start of every scan, run detection commands for each tool. Use `RunComman
 semgrep --version
 # Required scan when available: semgrep --config auto --json --quiet <project_path>
 
+# OSV-Scanner - Multi-ecosystem dependency vulnerability scanning
+osv-scanner --version
+# If found: osv-scanner scan --format json <project_path>
+
 # Bandit - Python security linter
 bandit --version
 # If found: bandit -r <project_path> -f json -ll
@@ -224,19 +239,19 @@ After detection, select tools based on detected project languages:
 
 | Language/Framework | Primary Tools | Secondary Tools |
 |-------------------|---------------|-----------------|
-| **JavaScript/TypeScript** | semgrep, eslint (security), npm audit | snyk, retire |
-| **Python** | bandit, safety, pip-audit | semgrep, snyk |
-| **Go** | gosec, govulncheck, trivy | semgrep |
-| **C# / .NET** | dotnet list package --vulnerable | semgrep, snyk |
-| **Java** | semgrep, snyk, OWASP dep-check | trivy |
+| **JavaScript/TypeScript** | semgrep, eslint (security), npm audit, osv-scanner | snyk, retire |
+| **Python** | bandit, safety, pip-audit, osv-scanner | semgrep, snyk |
+| **Go** | gosec, govulncheck, trivy, osv-scanner | semgrep |
+| **C# / .NET** | dotnet list package --vulnerable, osv-scanner | semgrep, snyk |
+| **Java** | semgrep, snyk, OWASP dep-check, osv-scanner | trivy |
 | **Ruby** | brakeman, bundler-audit | semgrep |
-| **Rust** | cargo audit | semgrep, trivy |
+| **Rust** | cargo audit, osv-scanner | semgrep, trivy |
 | **PHP** | semgrep, snyk | psalm (security) |
 | **Kotlin/Swift** | semgrep, snyk | trivy |
 | **Docker** | hadolint, trivy, grype | checkov |
 | **Terraform/IaC** | checkov, tflint, trivy | semgrep |
 | **Delphi/Lazarus** | AI-based analysis only | semgrep (if available) |
-| **Multi-language** | semgrep, trivy | snyk, grype |
+| **Multi-language** | semgrep, osv-scanner, trivy | snyk, grype |
 
 #### 0.3 Execution Strategy
 
@@ -316,6 +331,14 @@ trivy fs --format json --scanners vuln,misconfig,secret <project_path>
 trivy fs --severity HIGH,CRITICAL --format json <project_path>
 ```
 
+**OSV-Scanner (multi-ecosystem dependency SCA):**
+```bash
+osv-scanner scan --format json <project_path>
+```
+- Parse JSON `results[].packages[].vulnerabilities[]`
+- Map findings to OWASP A06: Vulnerable and Outdated Components
+- Do not run `osv-scanner fix` or guided remediation during CSReview
+
 **npm audit (Node.js dependencies):**
 ```bash
 cd <project_path> && npm audit --json
@@ -362,7 +385,13 @@ When tools are missing, provide platform-specific installation instructions:
 
 ```bash
 # Semgrep (all platforms)
-pip install semgrep
+pipx install semgrep
+# Alternative: uv tool install semgrep
+
+# OSV-Scanner
+# Windows: winget install Google.OSVScanner
+# macOS/Linux: brew install osv-scanner
+# Go: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
 
 # Bandit (Python)
 pip install bandit
@@ -1713,7 +1742,7 @@ When CSReview is invoked, it can operate in any of these modes:
 When invoked, follow these steps:
 
 1. **Announce the scan**: Inform user about starting security analysis
-2. **Phase 0 - Tool Detection**: Attempt Semgrep first (`semgrep --version`, then `semgrep --config auto --json --quiet <project_path>`). Detect installed framework/security tools (bandit, trivy, snyk, gosec, eslint, codeql, npm audit, pip-audit, etc.). Report which tools are available and which are missing. Run all available relevant tools against the project. Normalize tool output into unified findings format.
+2. **Phase 0 - Tool Detection**: Attempt Semgrep first (`semgrep --version`, then `semgrep --config auto --json --quiet <project_path>`). Then attempt read-only dependency scanners (`npm audit --json` for Node.js and `osv-scanner scan --format json <project_path>` when installed). Detect installed framework/security tools (bandit, trivy, snyk, gosec, eslint, codeql, pip-audit, etc.). Report which tools are available and which are missing. Run all available relevant tools against the project. Normalize tool output into unified findings format.
 3. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
 4. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws)
 5. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, Firebase cost/performance, and configurations
@@ -1735,6 +1764,8 @@ When invoked, follow these steps:
 - **Tool Detection First**: ALWAYS run Phase 0 (tool detection) before any analysis. The user must know which mode is active.
 - **Agent-Only Risk Disclosure**: When operating in Agent-Only mode, the agent MUST explicitly warn the user that findings have lower confidence and that real security tools should be installed for production audits. A less knowledgeable agent may miss critical vulnerabilities or produce incorrect recommendations.
 - **Semgrep Required Baseline**: Always attempt to run `semgrep` (universal) and the language-specific primary tool for the project being analyzed. If Semgrep is missing, mark the run lower-confidence and provide installation commands.
+- **Dependency SCA Complement**: Run `npm audit --json` for Node.js roots and `osv-scanner scan --format json <project_path>` when OSV-Scanner is installed. Never run dependency fix/update commands during CSReview.
+- **External Research Required When Uncertain**: If the agent is unsure about framework behavior, safe configuration, version-specific APIs, exploitability, or remediation, it MUST search external sources before making a confident claim. Use official framework documentation first, then vendor security advisories and specialized security sources such as OWASP, CWE, CVE/NVD, GitHub Security Advisories, OSV.dev, and Snyk. Do not guess.
 - **All Files Must Be Scanned**: When tools are available, ALL source files in the project MUST be scanned. When in Agent-Only mode, the agent MUST read and analyze every relevant source file - do not skip files or use sampling.
 - **Never expose secrets in chat**: If you find hardcoded credentials, mention them in the reports only, not in the conversation
 - **Be thorough but practical**: Focus on exploitable vulnerabilities, not theoretical edge cases

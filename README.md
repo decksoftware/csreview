@@ -29,7 +29,23 @@ semgrep --version
 semgrep --config auto --json --quiet <project_path>
 ```
 
-If Semgrep is unavailable, the report must explicitly mark the run as lower-confidence Agent-Only analysis and tell the user how to install Semgrep. Framework-native linters and scanners such as ESLint security plugins, npm audit, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, and Snyk should be called when relevant to the detected stack.
+If Semgrep is unavailable, the report must explicitly mark the run as lower-confidence Agent-Only analysis and tell the user how to install Semgrep. Semgrep is declared in the package metadata as a required external tool because the official distribution is a CLI installed with `pipx`, `uv`, Homebrew, Docker, or platform package managers rather than as a normal npm dependency.
+
+For dependency analysis, CSReview also attempts read-only SCA checks when available:
+- `npm audit --json` for Node.js projects
+- `osv-scanner scan --format json <project_path>` for multi-ecosystem dependency vulnerability scanning
+
+Framework-native linters and scanners such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, and Snyk should be called when relevant to the detected stack.
+
+### External Research is Mandatory When Uncertain
+
+Every coding agent using CSReview must research externally when it is unsure about framework behavior, security defaults, dependency advisories, CVE details, exploitability, or safe remediation. The expected source order is:
+
+- official framework documentation, release notes, migration guides, and security pages
+- vendor security advisories for the affected product, database, cloud service, BaaS, package manager, or SDK
+- specialized security references such as OWASP, CWE, CVE/NVD, GitHub Security Advisories, OSV.dev, and Snyk
+
+Do not guess. If external sources disagree or the exact version cannot be confirmed, CSReview must mark the finding as lower confidence and explain the uncertainty in the report.
 
 ### Why This Exists
 
@@ -88,6 +104,7 @@ CSReview operates in one of three modes depending on installed tools:
 | Tool | Purpose | Languages |
 |------|---------|-----------|
 | **Semgrep** | Static analysis (SAST) | 30+ languages |
+| **OSV-Scanner** | Dependency vulnerability scanning | npm, pip, Maven, Go, Cargo, RubyGems, NuGet, OS packages, containers |
 | **Bandit** | Python security linter | Python |
 | **Trivy** | Vulnerability + misconfig scanner | All (deps, containers, IaC) |
 | **Snyk** | Dependency vulnerabilities | All |
@@ -239,7 +256,10 @@ cp -r csreview/csreview ~/.trae/skills/csreview
 
 ### External Security Tools
 
-CSReview works standalone, but installing external tools enhances accuracy and provides additional validation layers. When tools are installed, CSReview operates in **Self-Hosted** or **Hybrid** mode with higher confidence levels.
+CSReview works standalone, but installing external tools enhances accuracy and provides additional validation layers. When tools are installed, CSReview operates in **Self-Hosted** or **Hybrid** mode with higher confidence levels. The npm package declares these tools in its `csreview` metadata:
+
+- Required external tool: `semgrep`
+- Recommended external tools: `osv-scanner`, `npm audit`
 
 #### Semgrep (Required Baseline)
 
@@ -255,17 +275,17 @@ CSReview works standalone, but installing external tools enhances accuracy and p
 **Installation:**
 
 ```bash
-# Python/pip (Windows, macOS, Linux)
-pip install semgrep
+# pipx (recommended isolated install)
+pipx install semgrep
+
+# uv tool install
+uv tool install semgrep
 
 # Homebrew (macOS/Linux)
 brew install semgrep
 
 # Docker
 docker pull semgrep/semgrep
-
-# pipx (recommended for isolated install)
-pipx install semgrep
 ```
 
 **Verify installation:**
@@ -273,7 +293,7 @@ pipx install semgrep
 semgrep --version
 # Expected output: X.Y.Z
 
-semgrep --config auto --dry-run .
+semgrep --config auto --json --quiet .
 # Verifies Semgrep can access community rules
 ```
 
@@ -289,10 +309,37 @@ If `semgrep` is not found in PATH after installation:
 - **Windows**: Add the Python Scripts directory to PATH (e.g., `C:\Users\<user>\AppData\Local\Programs\Python\PythonXX\Scripts\`)
 - **macOS/Linux**: Ensure `~/.local/bin` or the pip install location is in your `$PATH`
 
+#### OSV-Scanner (Recommended SCA Complement)
+
+**OSV-Scanner** complements Semgrep by checking dependency manifests and lockfiles against the OSV vulnerability database. Semgrep answers "is this code pattern dangerous?"; OSV answers "is this dependency/version known vulnerable?"
+
+**Installation:**
+
+```bash
+# Windows
+winget install Google.OSVScanner
+
+# macOS/Linux with Homebrew
+brew install osv-scanner
+
+# Go install
+go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest
+```
+
+**Verify and scan:**
+
+```bash
+osv-scanner --version
+osv-scanner scan --format json .
+```
+
+CSReview only uses OSV-Scanner in scan/report mode. It does not run OSV guided remediation or any dependency update command.
+
 **Other Supported Tools:**
 
 | Tool | Install Command | Purpose |
 |------|----------------|---------|
+| OSV-Scanner | `winget install Google.OSVScanner` / `brew install osv-scanner` | Multi-ecosystem dependency vulnerability scanning |
 | Bandit | `pip install bandit` | Python security linter |
 | Trivy | `brew install trivy` / [docs](https://aquasecurity.github.io/trivy/) | Vulnerability + misconfig scanner |
 | Snyk | `npm install -g snyk` | Dependency vulnerabilities |
