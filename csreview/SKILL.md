@@ -1,6 +1,6 @@
 ---
 name: "csreview"
-description: "Ultra-deep security audit and pentest analysis for codebases. Generates HTML report for humans and MD report for agents. Invoke when user requests security review, code audit, vulnerability scan, or pentest analysis."
+description: "Development-time local workspace security alignment for codebases. Generates HTML report for humans and MD report for agents. Invoke when user requests security review, code audit, vulnerability scan, or pentest-style static analysis."
 ---
 
 # CSReview - Code Security Review
@@ -194,6 +194,8 @@ Hard rules:
 5. **Barrier before reduce**: ASVS mapping, compliance mapping, and score calculation run only after all partial findings have returned. The coordinator applies `dedup -> ASVS -> compliance -> score -> report`.
 
 **Final check**: CSReview produces one pair of final reports, the final count matches the sum of partial findings after deduplication, and no tool appears executed more than once in the log.
+
+**Engine enforcement**: when `csreview-reports/.partials/` exists, the npm engine reads canonical partial JSON, merges valid `source: "subagent:<domain>"` findings into the final finding set, exposes `partialReconciliation`, and provides `reconcilePartials(outputDir, finalFindings, { strict: true })` for coordinators that need the run to fail when the DoD does not reconcile.
 
 #### Non-negotiable rules
 

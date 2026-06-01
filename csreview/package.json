@@ -1,7 +1,7 @@
 {
   "name": "csreview",
-  "version": "0.0.1",
-  "description": "Ultra-deep security audit and pentest analysis for codebases",
+  "version": "0.1.0",
+  "description": "Development-time local workspace security alignment for AI coding agents",
   "main": "src/index.js",
   "bin": {
     "csreview": "./src/cli.js"
@@ -14,7 +14,14 @@
     "test": "node --test test/analysis.test.js",
     "doctor": "node src/cli.js --doctor"
   },
-  "keywords": ["security", "audit", "pentest", "code-review"],
+  "keywords": [
+    "security",
+    "sast",
+    "sca",
+    "ai-agent-skill",
+    "semgrep",
+    "code-review"
+  ],
   "author": "decksoftware",
   "license": "MIT",
   "files": [

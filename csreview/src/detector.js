@@ -194,6 +194,26 @@ function shouldRedactPattern(pattern) {
     || /secret|password|passwd|pwd|token|credential|api.?key|private.?key|access.?key|jwt.?weak.?secret/i.test(`${pattern.id} ${pattern.name}`);
 }
 
+const SAME_LINE_CONTEXT_REQUIRED = new Set(['WEAK_RANDOM_GENERAL', 'XSS_VUE_VHTML', 'GO_UNSAFE_POINTER']);
+
+function hasSameLineRiskContext(pattern, line) {
+  const text = String(line || '');
+  if (pattern.id === 'WEAK_RANDOM_GENERAL') {
+    return /\b(token|secret|password|key|session|auth|otp|code|pin|nonce|iv|salt)\b/i.test(text);
+  }
+  if (pattern.id === 'XSS_VUE_VHTML') {
+    return /user|input|query|param|params|route|request|body|payload|comment|message|contentFrom|rawHtml|htmlFrom/i.test(text);
+  }
+  if (pattern.id === 'GO_UNSAFE_POINTER') {
+    return /user|input|param|params|request|req|body|payload|buffer|bytes|slice|reflect|uintptr/i.test(text);
+  }
+  return true;
+}
+
+function shouldSuppressNoisyHeuristic(pattern, line) {
+  return SAME_LINE_CONTEXT_REQUIRED.has(pattern.id) && !hasSameLineRiskContext(pattern, line);
+}
+
 function snippetAroundMatch(line, match, maxLength = 2000) {
   const text = String(line || '').trim();
   if (text.length <= maxLength) return text;
@@ -271,6 +291,10 @@ function detectInContent(content, filePath, language) {
       pattern.regex.lastIndex = 0;
       let match;
       while ((match = pattern.regex.exec(line)) !== null) {
+        if (shouldSuppressNoisyHeuristic(pattern, line)) {
+          if (!pattern.regex.global) break;
+          continue;
+        }
         findings.push({
           id: `${pattern.id}_${findings.length}`,
           severity: pattern.severity,

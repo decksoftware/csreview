@@ -9,6 +9,7 @@ import {
   deduplicateFindings,
   normalizeNpmAuditFindings,
   normalizeOsvScannerFindings,
+  reconcilePartials,
   runAnalysis,
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
@@ -26,6 +27,29 @@ function writeFile(root, relativePath, content) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, content, 'utf8');
   return target;
+}
+
+function makeFinding(overrides = {}) {
+  return {
+    id: 'SUBAGENT_1',
+    severity: 'HIGH',
+    category: 'Access Control',
+    name: 'Missing authorization guard',
+    description: 'A route is reachable without an authorization guard.',
+    file: 'src/routes.js',
+    line: 12,
+    vulnerableCode: 'router.get("/admin", handler)',
+    cwe: 'CWE-306',
+    owasp: 'A01:2021-Broken Access Control',
+    vibeRisk: false,
+    compliance: 'OWASP ASVS V4.1',
+    fix: 'Require an authorization middleware before the handler.',
+    confidence: 'HIGH',
+    exploitation: 'An unauthenticated user could request the route directly.',
+    references: ['https://owasp.org/Top10/A01_2021-Broken_Access_Control/'],
+    source: 'subagent:auth',
+    ...overrides,
+  };
 }
 
 function createFakeDastFetch(headers = {}, status = 200) {
@@ -139,6 +163,52 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   assert.match(markdown, /static-analysis hypothesis/i);
   assert.doesNotMatch(html, /Exploitation Scenario/);
   assert.doesNotMatch(markdown, /Exploitation Scenario/);
+});
+
+test('runAnalysis merges and reconciles canonical subagent partial findings', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'csreview-reports');
+  const partialsDir = path.join(outputDir, '.partials');
+  fs.mkdirSync(partialsDir, { recursive: true });
+  const finding = makeFinding();
+  fs.writeFileSync(
+    path.join(partialsDir, 'auth.json'),
+    JSON.stringify({ findings: [finding], toolExecutions: ['semgrep'] }),
+    'utf8',
+  );
+
+  const result = await runAnalysis(root, { outputDir, runTools: false });
+
+  assert.equal(result.partialReconciliation.ok, true);
+  assert.equal(result.partialReconciliation.status, 'ok');
+  assert.equal(result.partialReconciliation.partialFindingCount, 1);
+  assert.equal(result.partialReconciliation.dedupedPartialFindingCount, 1);
+  assert.ok(result.findings.some(f => f.source === 'subagent:auth'));
+});
+
+test('reconcilePartials flags invalid schemas, count mismatches, and duplicate tool executions', () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'csreview-reports');
+  const partialsDir = path.join(outputDir, '.partials');
+  fs.mkdirSync(partialsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(partialsDir, 'auth.json'),
+    JSON.stringify({ findings: [{ ...makeFinding(), source: 'auth' }], toolExecutions: ['semgrep'] }),
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(partialsDir, 'data.json'),
+    JSON.stringify({ findings: [makeFinding({ id: 'SUBAGENT_2', line: 24, source: 'subagent:data' })], toolExecutions: ['semgrep'] }),
+    'utf8',
+  );
+
+  const result = reconcilePartials(outputDir, []);
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /source: "subagent:<domain>"/);
+  assert.match(result.errors.join('\n'), /Final subagent finding count/);
+  assert.match(result.errors.join('\n'), /semgrep.*executed 2 times/i);
+  assert.throws(() => reconcilePartials(outputDir, [], { strict: true }), /Partial reconciliation failed/);
 });
 
 test('runAnalysis scans config and environment files for findings', async () => {
@@ -400,6 +470,29 @@ test('detector avoids common JavaScript false positives', () => {
   assert.ok(findings.every(f => !(f.file === 'src/login.js' && f.id.startsWith('GENERIC_PASSWORD'))));
 });
 
+test('detector suppresses noisy unconfirmed heuristics without same-line input context', () => {
+  const root = makeTempProject();
+  writeFile(root, 'src/random.js', 'const sample = Math.random();\nconst token = Math.random();\n');
+  writeFile(root, 'src/View.vue', '<template>\n<div v-html="trustedContent"></div>\n<div v-html="userInput"></div>\n</template>\n');
+  writeFile(root, 'main.go', 'package main\nimport "unsafe"\nfunc main() { var x int; _ = unsafe.Pointer(&x) }\nfunc read(userBuffer []byte) { _ = unsafe.Pointer(userBuffer) }\n');
+
+  const findings = detectVulnerabilities({
+    root,
+    files: [
+      { path: 'src/random.js', language: 'javascript' },
+      { path: 'src/View.vue', language: 'vue' },
+      { path: 'main.go', language: 'go' },
+    ],
+  });
+
+  assert.ok(findings.every(f => !(f.id.startsWith('WEAK_RANDOM_GENERAL') && /sample/.test(f.vulnerableCode))));
+  assert.ok(findings.some(f => f.id.startsWith('WEAK_RANDOM_GENERAL') && /token/.test(f.vulnerableCode)));
+  assert.ok(findings.every(f => !(f.id.startsWith('XSS_VUE_VHTML') && /trustedContent/.test(f.vulnerableCode))));
+  assert.ok(findings.some(f => f.id.startsWith('XSS_VUE_VHTML') && /userInput/.test(f.vulnerableCode)));
+  assert.ok(findings.every(f => !(f.id.startsWith('GO_UNSAFE_POINTER') && /&x/.test(f.vulnerableCode))));
+  assert.ok(findings.some(f => f.id.startsWith('GO_UNSAFE_POINTER') && /userBuffer/.test(f.vulnerableCode)));
+});
+
 test('detector skips generic vulnerability checks in minified files but still scans secrets', () => {
   const root = makeTempProject();
   const secret = 'minifiedsecret123456';
@@ -483,6 +576,10 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const semgrep = requiredTools.find(tool => tool.name === 'semgrep');
   const osvScanner = recommendedTools.find(tool => tool.name === 'osv-scanner');
 
+  assert.equal(pkg.version, '0.1.0');
+  assert.match(pkg.description, /development-time local workspace security alignment/i);
+  assert.ok(pkg.keywords.includes('ai-agent-skill'));
+  assert.ok(pkg.keywords.includes('semgrep'));
   assert.equal(skillInstallation.scope, 'global-agent-environment');
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
