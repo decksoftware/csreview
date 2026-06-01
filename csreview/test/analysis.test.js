@@ -241,7 +241,7 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.equal(skillInstallation.scope, 'global-agent-environment');
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
-  assert.equal(pkg.engines.node, '20 || >=22');
+  assert.equal(pkg.engines.node, '>=18');
   assert.match(pkg.dependencies.glob, /^\^13\./);
   assert.equal(semgrep?.required, true);
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
