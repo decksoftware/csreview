@@ -56,6 +56,22 @@ For dependency analysis, CSReview also attempts read-only SCA checks when availa
 
 Framework-native linters and scanners such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, and Snyk should be called when relevant to the detected stack.
 
+### Stack-Native Tool Recommendation Matrix
+
+After detecting the workspace stack, CSReview selects read-only tools that are native or commonly recommended for that ecosystem. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a tool is unavailable, the report records it as a `missing recommended tool`.
+
+| Detected stack | Prefer read-only commands and scanners |
+| --- | --- |
+| JavaScript / TypeScript / React / Node | `npm audit --json`, configured `eslint`, `eslint-plugin-security`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `typescript-eslint`, Semgrep |
+| .NET / C# / ASP.NET | `dotnet build --no-restore`, `dotnet format analyzers --verify-no-changes`, `dotnet package list --include-transitive --vulnerable --format json` or `dotnet list package --include-transitive --vulnerable --format json`, Roslyn analyzers, Semgrep |
+| Kotlin / Android / JVM | `gradlew lint` or `./gradlew lint`, Android Lint, `detekt`, `ktlint`, Qodana, Gradle dependency checks, OSV-Scanner, Semgrep |
+| Go | `go vet ./...`, `govulncheck ./...`, `gosec ./...`, `staticcheck ./...`, `golangci-lint run`, OSV-Scanner, Semgrep |
+| Python | `pip-audit`, `bandit -r`, `ruff check`, `safety`, OSV-Scanner, Semgrep |
+| Java / Spring | Maven/Gradle dependency checks, SpotBugs/FindSecBugs when configured, Checkstyle/PMD when configured, Qodana, OSV-Scanner, Semgrep |
+| Rust | `cargo audit`, `cargo deny check`, `cargo clippy --all-targets --all-features`, OSV-Scanner, Semgrep |
+| PHP / Ruby / Flutter | `composer audit`, PHPStan/Psalm, `bundle audit`, Brakeman, `dart analyze`, `flutter analyze`, OSV-Scanner, Semgrep |
+| IaC / containers / BaaS | Checkov, Trivy, Hadolint, Terraform validators, Supabase/Firebase/Appwrite rule validation when configured, Semgrep |
+
 ### External Research is Mandatory When Uncertain
 
 Every coding agent using CSReview must research externally when it is unsure about framework behavior, security defaults, dependency advisories, CVE details, exploitability, or safe remediation. The expected source order is:

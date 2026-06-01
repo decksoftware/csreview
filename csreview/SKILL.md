@@ -27,6 +27,23 @@ This skill performs development-time security alignment for the local workspace 
 
 **Dependency SCA complements Semgrep**: when available, CSReview MUST also run read-only dependency scanners such as `npm audit --json` for Node.js projects and `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL should be executed when relevant to the detected stack.
 
+**Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a recommended tool is unavailable, record it in the report as a `missing recommended tool` with the exact install/documentation pointer.
+
+| Detected stack | Prefer read-only commands and scanners |
+| --- | --- |
+| JavaScript / TypeScript / React / Node | `npm audit --json`, `npm run lint -- --format json` when configured, `eslint` with project config, `eslint-plugin-security`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `typescript-eslint`, Semgrep |
+| .NET / C# / ASP.NET | `dotnet build --no-restore`, `dotnet format analyzers --verify-no-changes`, `dotnet package list --include-transitive --vulnerable --format json` or `dotnet list package --include-transitive --vulnerable --format json`, .NET Roslyn analyzers (`CAxxxx`, `IDExxxx`), Semgrep, CodeQL/default setup when available |
+| Kotlin / Android / JVM | `gradlew lint` or `./gradlew lint`, Android Lint, `detekt`, `ktlint`, Qodana, Gradle dependency vulnerability checks, OSV-Scanner, Semgrep |
+| Go | `go vet ./...`, `govulncheck ./...`, `gosec ./...`, `staticcheck ./...`, `golangci-lint run`, OSV-Scanner, Semgrep |
+| Python | `pip-audit`, `bandit -r`, `ruff check`, `safety` when available, OSV-Scanner, Semgrep |
+| Java / Spring / Maven / Gradle | Maven/Gradle dependency checks, SpotBugs/FindSecBugs when configured, Checkstyle/PMD when configured, Qodana, OSV-Scanner, Semgrep |
+| Rust | `cargo audit`, `cargo deny check`, `cargo clippy --all-targets --all-features`, OSV-Scanner, Semgrep |
+| PHP / Laravel / Symfony | `composer audit --format=json`, PHPStan/Psalm when configured, Laravel Pint for linting, OSV-Scanner, Semgrep |
+| Ruby / Rails | `bundle audit`, `brakeman`, RuboCop when configured, OSV-Scanner, Semgrep |
+| Flutter / Dart | `dart analyze`, `flutter analyze`, `dart pub outdated --json`, OSV-Scanner, Semgrep |
+| IaC / containers / CI | Checkov, Trivy, Hadolint, Dockerfile linting, GitHub Actions linting, Terraform validators, Semgrep |
+| BaaS / database rules | Supabase CLI checks when configured, Firebase rules validation when configured, Appwrite/Convex/PocketBase config review, SQL linters when configured, Semgrep |
+
 **External Research Protocol**: Do not guess when framework behavior, configuration defaults, security controls, exploitability, dependency advisories, CVE details, or remediation guidance are uncertain. The coding agent MUST know how to perform external internet research when necessary and MUST consult primary or specialized sources before reporting a confident recommendation:
 
 - official framework documentation, release notes, migration guides, and security pages
