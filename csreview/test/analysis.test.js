@@ -361,6 +361,23 @@ test('skill requires external research when framework or security context is unc
   assert.match(skill, /Do not guess/i);
 });
 
+test('skill recommends stack-native read-only lint and scanner tools', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Stack-Native Tool Recommendation Matrix/i);
+  assert.match(docs, /do not install.*analyzed project/i);
+  assert.match(docs, /missing recommended tool/i);
+  assert.match(docs, /dotnet format analyzers/);
+  assert.match(docs, /dotnet (?:package list|list package).*--vulnerable/);
+  assert.match(docs, /eslint-plugin-security/);
+  assert.match(docs, /eslint-plugin-react-hooks/);
+  assert.match(docs, /gradlew lint/);
+  assert.match(docs, /detekt/);
+  assert.match(docs, /govulncheck/);
+  assert.match(docs, /gosec/);
+  assert.match(docs, /golangci-lint/);
+});
+
 test('documentation aligns report handoff names and avoids exact patch instructions', () => {
   const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
 
