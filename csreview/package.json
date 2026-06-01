@@ -1,0 +1,26 @@
+{
+  "name": "csreview",
+  "version": "1.0.0",
+  "description": "Ultra-deep security audit and pentest analysis for codebases",
+  "main": "src/index.js",
+  "bin": {
+    "csreview": "./src/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "keywords": ["security", "audit", "pentest", "code-review"],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "src/",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "glob": "^11.0.0"
+  }
+}

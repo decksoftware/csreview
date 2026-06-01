@@ -18,6 +18,19 @@ CSReview **NEVER modifies, deletes, or moves any files** in the analyzed project
 
 The actual fixes are applied by the human developer or the coding agent, not by CSReview.
 
+CSReview exists to slow down unsafe "vibe coding" before production: it inspects code, dependency manifests, framework configuration, database/BaaS rules, frontend/backend boundaries, and platform-specific surfaces, then writes a detailed report explaining what is exposed and why. It does not assume enough business or schema context to change the audited system itself.
+
+### Semgrep is Mandatory for Agent Analysis
+
+Every CSReview run must attempt to call **Semgrep** as the baseline SAST layer:
+
+```bash
+semgrep --version
+semgrep --config auto --json --quiet <project_path>
+```
+
+If Semgrep is unavailable, the report must explicitly mark the run as lower-confidence Agent-Only analysis and tell the user how to install Semgrep. Framework-native linters and scanners such as ESLint security plugins, npm audit, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, and Snyk should be called when relevant to the detected stack.
+
 ### Why This Exists
 
 Security vulnerabilities cost companies billions annually. Most development teams lack dedicated security engineers to review code before deployment. With the rise of **vibe coding** (non-technical users building software with AI agents), security risks have multiplied. CSReview bridges this gap by providing:
@@ -25,7 +38,7 @@ Security vulnerabilities cost companies billions annually. Most development team
 1. **Automated Pentest-Level Analysis**: Goes beyond basic linting - performs the same depth of analysis a human security consultant would do
 2. **Dual Report System**:
    - **HTML Report** in the user's language for human understanding
-   - **Markdown Report** in English for AI coding agents to parse and fix vulnerabilities
+   - **Markdown Report** in English for AI coding agents to parse and plan remediations without changing the audited code automatically
 3. **Universal Compatibility**: Works with any AI coding agent (Trae, OpenCode, Qwen CLI, Codex, Claude Code, Antigravity, Qoder, Cursor, Windsurf, Cline, GitHub Copilot CLI, Aider, Continue, DevChat)
 4. **Multi-Platform Coverage**: Analyzes code for macOS, iOS, Linux, Windows, web, mobile, and backend systems
 5. **Vibe Coding Protection**: Specifically detects vulnerabilities commonly introduced by AI-generated code
@@ -51,7 +64,7 @@ Security vulnerabilities cost companies billions annually. Most development team
 
 | Phase | Name | Description |
 |-------|------|-------------|
-| 0 | **Tool Detection** | Detect installed security tools (semgrep, bandit, trivy, snyk, gosec, eslint, codeql, etc.) and use them for real file-by-file scanning |
+| 0 | **Tool Detection** | Require a Semgrep attempt, detect framework-native linters/scanners (eslint, npm audit, bandit, trivy, snyk, gosec, codeql, etc.), and use available tools for real file-by-file scanning |
 | 1 | **Reconnaissance** | Project structure scan, secret detection, external service mapping |
 | 2 | **Ultra-Deep Security** | Injection, auth, data leakage, XSS/CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws |
 | 3 | **Database Security** | SQL/NoSQL/BaaS structure analysis, Firebase cost & performance, access patterns |
@@ -103,7 +116,7 @@ CSReview includes a complete code review system - no additional skills or plugin
 | **Adversarial Review** | `@csreview adversarial [files]` | Red-team mindset: boundary conditions, failure modes, edge cases |
 | **Security Review** | `@csreview security-review [files]` | Security-focused review with vulnerability detection |
 | **Request Review** | `@csreview request-review [scope]` | Review of PR/branch/commit with change-type detection |
-| **Apply Fixes** | `@csreview apply-fixes [report]` | Parse and apply fixes from a CSReview report |
+| **Remediation Planning** | `@csreview review security-findings.md` | Parse the report, understand context, and plan fixes for a human or coding agent to apply deliberately |
 
 ### Analysis Capabilities
 
@@ -224,6 +237,73 @@ cp -r csreview/csreview ~/.trae/skills/csreview
    - "Verify LGPD and GDPR compliance"
    - "Check if my code has vibe coding vulnerabilities"
 
+### External Security Tools
+
+CSReview works standalone, but installing external tools enhances accuracy and provides additional validation layers. When tools are installed, CSReview operates in **Self-Hosted** or **Hybrid** mode with higher confidence levels.
+
+#### Semgrep (Required Baseline)
+
+**Semgrep** is the primary external SAST tool used by CSReview. Agents must attempt to run it on every audit. It provides advanced static analysis rules across 30+ languages and significantly improves detection accuracy.
+
+**Why install Semgrep?**
+- Validates CSReview findings with industry-standard SAST rules
+- Detects patterns that regex-based scanning may miss
+- Provides CONFIRMED/TOOL-ONLY confidence level for findings
+- Community rules cover OWASP Top 10, CWE, and framework-specific issues
+- Free tier available for local scanning
+
+**Installation:**
+
+```bash
+# Python/pip (Windows, macOS, Linux)
+pip install semgrep
+
+# Homebrew (macOS/Linux)
+brew install semgrep
+
+# Docker
+docker pull semgrep/semgrep
+
+# pipx (recommended for isolated install)
+pipx install semgrep
+```
+
+**Verify installation:**
+```bash
+semgrep --version
+# Expected output: X.Y.Z
+
+semgrep --config auto --dry-run .
+# Verifies Semgrep can access community rules
+```
+
+**Important:** Semgrep must be available in the system PATH for CSReview to detect it globally. After installation, verify it's accessible from any directory:
+```bash
+# Open a NEW terminal and run:
+where semgrep    # Windows
+which semgrep    # macOS/Linux
+semgrep --version
+```
+
+If `semgrep` is not found in PATH after installation:
+- **Windows**: Add the Python Scripts directory to PATH (e.g., `C:\Users\<user>\AppData\Local\Programs\Python\PythonXX\Scripts\`)
+- **macOS/Linux**: Ensure `~/.local/bin` or the pip install location is in your `$PATH`
+
+**Other Supported Tools:**
+
+| Tool | Install Command | Purpose |
+|------|----------------|---------|
+| Bandit | `pip install bandit` | Python security linter |
+| Trivy | `brew install trivy` / [docs](https://aquasecurity.github.io/trivy/) | Vulnerability + misconfig scanner |
+| Snyk | `npm install -g snyk` | Dependency vulnerabilities |
+| Gosec | `go install github.com/securego/gosec/v2/cmd/gosec@latest` | Go security linter |
+| pip-audit | `pip install pip-audit` | Python dependency audit |
+| cargo audit | `cargo install cargo-audit` | Rust dependency audit |
+| Checkov | `pip install checkov` | Infrastructure-as-code security |
+| Hadolint | `brew install hadolint` / `docker pull hadolint/hadolint` | Dockerfile security |
+
+CSReview automatically detects which tools are installed and adjusts its analysis mode accordingly. If Semgrep is missing, CSReview continues only as a lower-confidence report and clearly flags that limitation.
+
 ### Manual Invocation
 
 Simply ask your AI coding assistant:
@@ -296,9 +376,9 @@ Simply ask your AI coding assistant:
 @csreview request-review main..feature/auth
 ```
 
-### Apply Fixes from Report
-```
-@csreview apply-fixes security-findings.md
+### Plan Remediation from Report
+``` 
+@csreview review security-findings.md
 ```
 
 ## Severity Classification
@@ -366,7 +446,7 @@ Phase 7: Vibe Coding Protection
 
 Phase 8: Report Generation
   - HTML report (user language) for human review
-  - Markdown report (English) for AI agent auto-fix
+  - Markdown report (English) for human/coding-agent remediation planning
 ```
 
 ## Contributing
