@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test test/analysis.test.js",
     "doctor": "node src/cli.js --doctor"
   },
   "keywords": ["security", "audit", "pentest", "code-review"],
