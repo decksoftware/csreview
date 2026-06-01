@@ -14,6 +14,7 @@ import { generateHtmlReport } from '../src/reports/html.js';
 import { generateMarkdownReport } from '../src/reports/markdown.js';
 import { normalizeLocalPath, safeResolveInside } from '../src/pathSafety.js';
 import { calculateSecurityScore } from '../src/score.js';
+import { runLocalDast } from '../src/localDast.js';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
@@ -24,6 +25,31 @@ function writeFile(root, relativePath, content) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, content, 'utf8');
   return target;
+}
+
+function createFakeDastFetch(headers = {}, status = 200) {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return {
+      status,
+      headers: {
+        forEach(callback) {
+          for (const [key, value] of Object.entries(headers)) {
+            callback(value, key);
+          }
+        },
+        get(name) {
+          const found = Object.entries(headers)
+            .find(([key]) => key.toLowerCase() === String(name).toLowerCase());
+          return found ? found[1] : null;
+        },
+      },
+      text: async () => '',
+    };
+  };
+  fetchImpl.calls = calls;
+  return fetchImpl;
 }
 
 test('path helpers normalize local roots and reject traversal targets', () => {
@@ -127,6 +153,82 @@ test('runAnalysis sanitizes agent report names without regex-heavy processing', 
 
   assert.equal(path.basename(result.reports.html), 'codex-security-2026_security-report.html');
   assert.equal(path.basename(result.reports.markdown), 'codex-security-2026_security-findings.md');
+});
+
+test('local DAST requires explicit confirmation before sending HTTP requests', async () => {
+  const root = makeTempProject();
+  const fetchImpl = createFakeDastFetch();
+
+  await assert.rejects(
+    () => runLocalDast(root, {
+      targetUrl: 'http://localhost:3000',
+      fetchImpl,
+    }),
+    /explicit confirmation/i,
+  );
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('local DAST rejects non-local targets and aborts before requests', async () => {
+  const root = makeTempProject();
+  const fetchImpl = createFakeDastFetch();
+
+  await assert.rejects(
+    () => runLocalDast(root, {
+      targetUrl: 'https://example.com',
+      confirmed: true,
+      fetchImpl,
+    }),
+    /only localhost or 127\.0\.0\.1/i,
+  );
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('local DAST aborts when development env files reference external hosts', async () => {
+  const root = makeTempProject();
+  const fetchImpl = createFakeDastFetch();
+  writeFile(root, '.env.local', 'API_URL=https://api.example.com\nLOCAL_URL=http://localhost:3000\n');
+
+  await assert.rejects(
+    () => runLocalDast(root, {
+      targetUrl: 'http://localhost:3000',
+      confirmed: true,
+      fetchImpl,
+    }),
+    /external host.*api\.example\.com/i,
+  );
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('local DAST writes complementary reports with commands and dynamic statuses', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'csreview-reports');
+  const fetchImpl = createFakeDastFetch({
+    'content-type': 'text/html',
+    'access-control-allow-origin': 'https://evil.com',
+  });
+
+  const result = await runLocalDast(root, {
+    targetUrl: 'http://localhost:3000',
+    confirmed: true,
+    agentName: 'Codex',
+    outputDir,
+    fetchImpl,
+  });
+
+  assert.equal(path.basename(result.reports.html), 'codex_local-dast-report.html');
+  assert.equal(path.basename(result.reports.markdown), 'codex_local-dast-findings.md');
+  assert.ok(result.results.some(item => item.status === 'DAST-SUSPECTED'));
+  assert.ok(result.results.every(item => /^DAST-(SUSPECTED|CLEAN)$/.test(item.status)));
+  assert.ok(fetchImpl.calls.every(call => call.options.redirect === 'manual'));
+
+  const markdown = fs.readFileSync(result.reports.markdown, 'utf8');
+  const html = fs.readFileSync(result.reports.html, 'utf8');
+  assert.match(markdown, /Dynamic Analysis \(DAST\) - Local Complementary Report/);
+  assert.match(markdown, /curl -s -I --max-redirs 0 http:\/\/localhost:3000/);
+  assert.match(markdown, /DAST-SUSPECTED/);
+  assert.match(markdown, /access-control-allow-origin: https:\/\/evil\.com/i);
+  assert.match(html, /Dynamic Analysis \(DAST\) - Local Complementary Report/);
 });
 
 test('shared scoring counts config-only findings against audited files', () => {
@@ -378,6 +480,23 @@ test('skill recommends stack-native read-only lint and scanner tools', () => {
   assert.match(docs, /golangci-lint/);
 });
 
+test('skill permits only explicit complementary local DAST after remediation', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Phase 9: Optional Local DAST Complementary Report/i);
+  assert.match(docs, /after the user or coding agent has implemented/i);
+  assert.match(docs, /explicit user confirmation/i);
+  assert.match(docs, /local test environment/i);
+  assert.match(docs, /never production/i);
+  assert.match(docs, /database copy/i);
+  assert.match(docs, /White Hat Hacker/i);
+  assert.match(docs, /localhost|127\.0\.0\.1/);
+  assert.match(docs, /abort Phase 9/i);
+  assert.match(docs, /csreview-reports\/<agent>_local-dast-report\.html/);
+  assert.match(docs, /DAST-SUSPECTED|DAST-CLEAN|DAST-CONFIRMED/);
+  assert.doesNotMatch(docs, /DROP TABLE/i);
+});
+
 test('README exposes the canonical SKILL.md for GitHub landing review', () => {
   const readme = fs.readFileSync('../README.md', 'utf8').replace(/\r\n/g, '\n');
   const skill = fs.readFileSync('SKILL.md', 'utf8').replace(/\r\n/g, '\n').trim();
@@ -422,7 +541,7 @@ test('skill positions CSReview as local development-time security alignment only
   assert.match(skill, /## Scope/);
   assert.match(skill, /IN SCOPE[\s\S]*local development workspace\/project/i);
   assert.match(skill, /GOAL[\s\S]*SECURITY and EFFICIENCY/i);
-  assert.match(skill, /OUT OF SCOPE \/ PROHIBITED[\s\S]*DAST against running targets/i);
+  assert.match(skill, /OUT OF SCOPE \/ PROHIBITED[\s\S]*unconfirmed dynamic testing/i);
   assert.match(skill, /Reference documentation research[\s\S]*ALLOWED/i);
   assert.doesNotMatch(skill, new RegExp('automated pentest ' + 'level', 'i'));
 });

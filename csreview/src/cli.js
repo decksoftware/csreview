@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { existsSync } from 'fs';
 import chalk from 'chalk';
 import { checkExternalTools, runAnalysis } from './index.js';
+import { runLocalDast } from './localDast.js';
 
 const args = process.argv.slice(2);
 
@@ -42,6 +43,8 @@ ${chalk.bold('USAGE:')}
 ${chalk.bold('OPTIONS:')}
   --output, -o <dir>    Output directory for reports (default: <target>/csreview-reports/)
   --agent-name <name>   Prefix report files with the coding agent name (default: codex)
+  --local-dast-url <url> Run complementary local-only DAST against localhost/127.0.0.1
+  --confirm-local-dast  Required confirmation flag for --local-dast-url
   --doctor              Check external security tools without scanning source code
   --help, -h            Show this help message
 
@@ -50,12 +53,17 @@ ${chalk.bold('EXAMPLES:')}
   csreview /path/to/project
   csreview . --output ./security-reports
   csreview . --agent-name claude
+  csreview . --local-dast-url http://localhost:3000 --confirm-local-dast
   csreview --doctor .
 
 ${chalk.bold('OUTPUT:')}
   Generates two reports in the output directory:
   - <agent>_security-report.html    - Human-readable HTML report with charts and navigation
   - <agent>_security-findings.md    - Machine-parseable Markdown for AI coding agents
+
+  With --local-dast-url, also generates complementary local dynamic reports:
+  - <agent>_local-dast-report.html
+  - <agent>_local-dast-findings.md
 
 ${chalk.bold('SECURITY TOOLS:')}
   CSReview is read-only for audited source code. It writes reports only.
@@ -72,6 +80,7 @@ ${chalk.bold('SECURITY TOOLS:')}
 const targetDir = resolve(args[0]);
 let outputDir = null;
 let agentName = process.env.CSREVIEW_AGENT_NAME || 'codex';
+let localDastUrl = null;
 
 const outputIdx = args.findIndex(a => a === '--output' || a === '-o');
 if (outputIdx !== -1 && args[outputIdx + 1]) {
@@ -82,6 +91,12 @@ const agentNameIdx = args.findIndex(a => a === '--agent-name');
 if (agentNameIdx !== -1 && args[agentNameIdx + 1]) {
   agentName = args[agentNameIdx + 1];
 }
+
+const localDastIdx = args.findIndex(a => a === '--local-dast-url');
+if (localDastIdx !== -1 && args[localDastIdx + 1]) {
+  localDastUrl = args[localDastIdx + 1];
+}
+const localDastConfirmed = args.includes('--confirm-local-dast');
 
 if (!existsSync(targetDir)) {
   console.error(chalk.red(`\n  Error: Directory not found: ${targetDir}\n`));
@@ -147,6 +162,31 @@ try {
   console.log(chalk.bold('\n  Reports:\n'));
   console.log(`    ${chalk.cyan('HTML')}  ${result.reports.html}`);
   console.log(`    ${chalk.cyan('MD')}    ${result.reports.markdown}`);
+
+  if (localDastUrl) {
+    console.log(chalk.bold('\n  Running Local DAST Complement\n'));
+    console.log(chalk.yellow('  Local test environment only. Never use this against production.'));
+    console.log(chalk.yellow('  If this test uses a database copy, keep it deliberate, local, secure, and sanitized/minimized where needed.'));
+    console.log(chalk.gray('  Purpose: White Hat Hacker-style analysis and remediation of security flaws.\n'));
+    const localDast = await runLocalDast(targetDir, {
+      targetUrl: localDastUrl,
+      confirmed: localDastConfirmed,
+      agentName,
+      outputDir: resolve(targetDir, 'csreview-reports'),
+    });
+    const suspected = localDast.results.filter(item => item.status === 'DAST-SUSPECTED').length;
+    const clean = localDast.results.filter(item => item.status === 'DAST-CLEAN').length;
+    console.log(`  Target:         ${localDast.target}`);
+    console.log(`  DAST-SUSPECTED: ${suspected}`);
+    console.log(`  DAST-CLEAN:     ${clean}`);
+    console.log(chalk.bold('\n  Local DAST Reports:\n'));
+    console.log(`    ${chalk.cyan('HTML')}  ${localDast.reports.html}`);
+    console.log(`    ${chalk.cyan('MD')}    ${localDast.reports.markdown}`);
+  } else {
+    console.log(chalk.gray('\n  After remediating findings, you may run optional local-only DAST:'));
+    console.log(chalk.gray(`  csreview ${targetDir} --local-dast-url http://localhost:3000 --confirm-local-dast --agent-name ${agentName}`));
+  }
+
   console.log('');
 } catch (err) {
   console.error(chalk.red(`\n  Fatal Error: ${err.message}\n`));

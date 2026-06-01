@@ -26,9 +26,9 @@ This skill performs development-time security alignment for the local workspace 
 
 ## Scope
 
-- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only.
+- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is in scope only after remediation work, only with explicit user confirmation, and only against `localhost` or `127.0.0.1`.
 - **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
-- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, or production systems; external service endpoints used by the app; DAST against running targets; modifying audited code; exfiltrating data.
+- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
@@ -80,7 +80,34 @@ When external research is used, include source names and URLs in the finding ref
 
 The coding agent must not infer findings from the verbal summary alone. For remediation work, it must read the Markdown report path first, then inspect the referenced source files, framework documentation, schemas, tests, and security advisories before proposing or applying changes.
 
-The analysis covers 8 phases: Reconnaissance, Ultra-Deep Security, Database Security, SLSA 3 Supply Chain, OWASP ASVS, Compliance (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA), Vibe Coding Protection, and Dual Report Generation.
+**Phase 9: Optional Local DAST Complementary Report**: after the user or coding agent has implemented and validated remediations from the static CSReview report, the agent MUST inform the user that an optional broader local dynamic validation is available. This phase is not part of the default SAST/SCA run and MUST NOT start automatically.
+
+The required user-facing prompt is: "Static remediation is complete. You can optionally run CSReview Phase 9 Local DAST in a local test environment only. Never use this against production. If the test uses a database copy, make sure the copy was made deliberately, stored in a secure local place, and sanitized or minimized where needed. This resource is for White Hat Hacker-style analysis and remediation of security flaws; it sends real HTTP requests only to localhost/127.0.0.1 and writes a complementary report. Do you want me to run it? (yes/no)"
+
+Phase 9 may proceed only when all of these are true:
+
+- The user gives explicit user confirmation.
+- The user understands this is for a local test environment, never production, and that any database copy used for testing must be securely created, stored, and handled.
+- The target URL is strictly `http://localhost:<port>`, `https://localhost:<port>`, `http://127.0.0.1:<port>`, or `https://127.0.0.1:<port>`.
+- `.env`, `.env.local`, and `.env.development` contain no external hosts for app services, APIs, databases, auth providers, BaaS endpoints, or storage endpoints. If any external host is found, abort Phase 9 and warn the user.
+- Redirects are not followed. If a response points to an external host, abort Phase 9 immediately.
+- The complementary reports are written only inside `csreview-reports/` as `csreview-reports/<agent>_local-dast-report.html` and `csreview-reports/<agent>_local-dast-findings.md`.
+
+The CLI form is:
+
+```bash
+csreview . --local-dast-url http://localhost:3000 --confirm-local-dast --agent-name codex
+```
+
+Phase 9 output uses dynamic status labels:
+
+- `DAST-CONFIRMED`: dynamically reproduced with clear evidence, normally from a dedicated local DAST tool or an explicitly allowed endpoint test.
+- `DAST-SUSPECTED`: anomalous local response that requires human review.
+- `DAST-CLEAN`: the checked condition passed for the local target.
+
+Hard limits: never probe external IPs, domains, staging, or production; never follow redirects to external hosts; never write outside `csreview-reports/`; never use destructive payloads; never use DELETE; do not send mutating POST/PUT/PATCH requests unless the user provided an explicit local test endpoint allowlist and confirmed the data mutation risk. The built-in CSReview local DAST mode is conservative and performs non-mutating HTTP checks such as reachability, browser security headers, and CORS behavior. OWASP ZAP or Nikto may be used only when installed, only after the same pre-flight checks and confirmation, and only against the confirmed local target.
+
+The analysis covers 8 default phases: Reconnaissance, Ultra-Deep Security, Database Security, SLSA 3 Supply Chain, OWASP ASVS, Compliance (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA), Vibe Coding Protection, and Dual Report Generation. Phase 9 is optional, local-only, post-remediation, and produces a complementary report.
 
 CSReview includes built-in **Code Review** capabilities (equivalent to codex:review, codex:adversarial-review, code-review, requesting-code-review, receiving-code-review) - no additional skills or plugins required.
 
@@ -1892,9 +1919,9 @@ CSReview exists to slow down unsafe "vibe coding" before release: it inspects lo
 
 ### Scope
 
-- **IN SCOPE**: the local development workspace/project, including local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only.
+- **IN SCOPE**: the local development workspace/project, including local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is allowed only after remediation work, only with explicit user confirmation, and only against `localhost` or `127.0.0.1`.
 - **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
-- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, or production systems; external service endpoints used by the app; DAST against running targets; modifying audited code; exfiltrating data.
+- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
 ### Global Skill Installation Only
@@ -1966,6 +1993,24 @@ After every run, CSReview must show the user:
 
 The verbal summary is not enough for implementation. A coding agent must analyze the Markdown report and then inspect the referenced source files, schemas, tests, framework documentation, and security advisories before proposing or applying changes.
 
+### Optional Local DAST Complement
+
+After the user or coding agent implements and validates remediations from the static report, CSReview can optionally run a complementary Local DAST report against a local test environment only. This is never automatic and never allowed against production.
+
+Use it only when:
+
+- the user explicitly confirms the test;
+- the target is `localhost` or `127.0.0.1`;
+- `.env`, `.env.local`, and `.env.development` do not point to external services;
+- any database copy used for testing was deliberately made, stored in a secure local place, and sanitized or minimized where needed;
+- the goal is White Hat Hacker-style analysis and remediation of security flaws.
+
+```bash
+csreview . --local-dast-url http://localhost:3000 --confirm-local-dast --agent-name codex
+```
+
+The complementary files are written to `csreview-reports/<agent>_local-dast-report.html` and `csreview-reports/<agent>_local-dast-findings.md`.
+
 ### Why This Exists
 
 Security vulnerabilities cost companies billions annually. Most development teams lack dedicated security engineers to review code before deployment. With the rise of **vibe coding** (non-technical users building software with AI agents), security risks have multiplied. CSReview bridges this gap by providing:
@@ -1995,7 +2040,7 @@ Security vulnerabilities cost companies billions annually. Most development team
 
 ## Features
 
-### 9-Phase Analysis Pipeline
+### 8 Default Phases + Optional Local DAST
 
 | Phase | Name | Description |
 |-------|------|-------------|
@@ -2008,6 +2053,7 @@ Security vulnerabilities cost companies billions annually. Most development team
 | 6 | **Compliance** | LGPD, GDPR, SOC 2 Type II, HIPAA, CCPA/CPRA regulatory analysis |
 | 7 | **Vibe Coding** | AI-generated code pattern detection, risk scoring, behavioral analysis |
 | 8 | **Report Generation** | HTML (user language) + MD (English for agents) dual report system |
+| 9 | **Optional Local DAST** | Complementary post-remediation local-only dynamic checks against `localhost`/`127.0.0.1` after explicit user confirmation |
 
 ### Analysis Modes
 
