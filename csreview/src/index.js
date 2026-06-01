@@ -442,10 +442,6 @@ async function runSemgrep(rootDir) {
         'node_modules',
         '--exclude',
         'csreview-reports',
-        '--exclude',
-        'security-report.html',
-        '--exclude',
-        'security-findings.md',
         rootDir,
       ],
       {
@@ -608,13 +604,33 @@ async function runSecurityTools(rootDir, options) {
     runNpmAudit(rootDir),
     runOsvScanner(rootDir),
   ]);
-  const hasAnyTool = semgrep.available || npmAudit.available || osvScanner.available;
   return {
-    mode: hasAnyTool ? 'Hybrid' : 'Agent-Only',
+    mode: classifyToolMode({ semgrep, npmAudit, osvScanner }),
     semgrep,
     npmAudit,
     osvScanner,
   };
+}
+
+export function classifyToolMode(toolResults = {}) {
+  const relevantTools = [
+    toolResults.semgrep,
+    toolResults.osvScanner,
+  ];
+
+  if (!toolResults.npmAudit?.skipped) {
+    relevantTools.push(toolResults.npmAudit);
+  }
+
+  const concreteTools = relevantTools.filter(Boolean);
+  const availableCount = concreteTools.filter(tool => tool.available).length;
+  if (availableCount === 0) {
+    return 'Agent-Only';
+  }
+  if (availableCount === concreteTools.length) {
+    return 'Self-Hosted';
+  }
+  return 'Hybrid';
 }
 
 export async function runAnalysis(rootDir, options = {}) {

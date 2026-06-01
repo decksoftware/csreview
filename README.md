@@ -40,9 +40,9 @@ This skill performs development-time security alignment for the local workspace 
 
 **Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. Semgrep is a required external CLI tool, not a normal bundled npm dependency; install it with `pipx install semgrep`, `uv tool install semgrep`, Homebrew, Docker, or the platform package manager. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions.
 
-**Dependency SCA complements Semgrep**: when available, CSReview MUST also run read-only dependency scanners such as `npm audit --json` for Node.js projects and `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL should be executed when relevant to the detected stack.
+**Dependency SCA complements Semgrep**: when available, the deterministic npm engine orchestrates and parses `npm audit --json` for Node.js projects and `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL are agent-recommended stack-native tools: the agent may run them when relevant and available, but they are not parsed by the npm engine unless explicitly added to the engine-orchestrated tool list.
 
-**Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a recommended tool is unavailable, record it in the report as a `missing recommended tool` with the exact install/documentation pointer.
+**Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a recommended tool is unavailable, record it in the report as a `missing recommended tool` with the exact install/documentation pointer. These tools are agent-recommended unless listed under Engine-Orchestrated Tools.
 
 | Detected stack | Prefer read-only commands and scanners |
 | --- | --- |
@@ -179,44 +179,74 @@ This skill is designed to work across multiple AI coding agents:
 
 ## Analysis Phases
 
+### Scatter-Gather Security Subagent Orchestration
+
+When the coding-agent runtime supports subagents and the workspace is large enough to justify the extra token/runtime cost, CSReview MAY ask the coding agent to use a scatter-gather workflow. This is an orchestration rule for agent reasoning, not a replacement for the deterministic npm engine.
+
+The dependency graph is:
+
+1. **Phase 0 + Phase 1 sequential gate**: first detect tools, run the engine-orchestrated SAST/SCA tools once, scan the local workspace, and build the shared project map (`techStack`, frameworks, package managers, BaaS files, database files, IaC files, routes, and generated tool JSON).
+2. **Compatibility-gated fan-out**: spawn only the subagents that match the map. Examples: do not spawn a Delphi subagent without Pascal/Delphi files; do not spawn a Firebase subagent without Firebase rules/config; do not spawn a Go subagent without Go modules/files.
+3. **Parallel validation**: compatible subagents validate candidate findings in their domain by reading the shared map, relevant local files, and cached tool output. They must not rerun heavy SAST/SCA tools across the whole tree.
+4. **Gather barrier**: wait for all subagents to finish before ASVS/compliance correlation.
+5. **Reduce/correlation**: one coordinator merges all partial findings, runs deduplication, applies ASVS/compliance mapping, calculates score, and prepares the report.
+6. **Single writer**: only the coordinator writes final HTML/Markdown reports. Subagents may write partial JSON only under a scratch area inside `csreview-reports/`, and those partial files must use the canonical finding schema.
+
+Hard rules:
+
+- If subagents are unavailable, too expensive for the repository size, or not supported by the current agent, fallback to sequential analysis.
+- Run SAST/SCA tools once in the gate stage; later subagents consume cached tool output instead of rerunning Semgrep, OSV-Scanner, npm audit, Trivy, or similar whole-tree scans.
+- Every subagent finding must use the canonical finding schema (`id`, `severity`, `category`, `name`, `description`, `file`, `line`, `vulnerableCode`, `cwe`, `owasp`, `fix`, `confidence`, `exploitation`, `references`, `source`). Use `source: "subagent:<domain>"`, for example `source: "subagent:auth"`, so the coordinator can correlate and deduplicate against `csreview-detector`, `semgrep`, `npm-audit`, and `osv-scanner`.
+- Subagents do not write final reports and do not modify audited source code.
+- The coordinator owns final deduplication. Matching `file:line:CWE` evidence from multiple sources can be promoted to `CONFIRMED`.
+
 ### Phase 0: Security Tool Detection & Integration
 
 **This is the FIRST step of every analysis.** CSReview MUST detect which security tools are available on the user's operating system and use them for real file-by-file scanning. When real tools are not available, CSReview falls back to AI-based analysis (which is less thorough).
 
 #### 0.0 Analysis Modes
 
-CSReview operates in one of two modes:
+CSReview operates in three modes. These mode names are based on the deterministic npm engine's orchestrated tools, not on every agent-recommended tool listed in this skill.
 
 **Mode A: Self-Hosted (RECOMMENDED)**
-- User has security tools installed locally (semgrep, bandit, trivy, snyk, gosec, etc.)
-- CSReview detects and invokes these tools for real file-by-file scanning
-- Results are deterministic, reproducible, and based on rule databases updated regularly
-- Higher confidence in findings - tools use proven detection rules
-- **This is the preferred and recommended mode for production audits**
+- All relevant engine-orchestrated tools are available locally: Semgrep, OSV-Scanner, and npm audit when `package.json` exists.
+- CSReview detects, invokes, parses, deduplicates, and scores these deterministic outputs.
+- Findings from parsed tools are reproducible and can become `TOOL-ONLY` or `CONFIRMED` when matching CSReview detector evidence.
+- Agent-recommended stack-native tools may still be listed as missing or supplemental; they do not change the engine mode unless their outputs are parsed by the npm engine.
+- **This is the highest-confidence CSReview engine mode for local workspace analysis.**
 
 **Mode B: Agent-Only (FALLBACK)**
-- No security tools installed on the system
-- CSReview uses the AI agent's code understanding capabilities to analyze files
-- The agent reads source files and applies pattern matching for vulnerability detection
-- **WARNING**: This mode depends on the agent's training knowledge and capabilities
-- **RISK**: An agent with limited security knowledge may miss vulnerabilities or produce false positives/negatives
-- **RISK**: Novel or obfuscated attack patterns may not be detected without real tooling
-- **RISK**: Dependency vulnerability checks require a CVE database - AI cannot reliably match all versions to known CVEs
-- Always clearly mark findings as `AI-ESTIMATED` confidence level
-- Always recommend installing real tools for critical security audits
+- No engine-orchestrated tool is available.
+- CSReview relies on local scanner metadata plus regex/static heuristics and any careful agent reading of local files.
+- **WARNING**: This mode has lower precision and recall. Line-oriented regex checks can miss multiline issues and may report false positives.
+- Always clearly mark the run lower confidence and recommend installing Semgrep and OSV-Scanner before relying on the result.
 
 **Mode C: Hybrid (BEST)**
-- Some tools installed, some not
-- CSReview runs available tools AND supplements with AI analysis
-- Tool findings are marked `CONFIRMED` or `TOOL-ONLY`
-- AI-only findings are marked `AI-ONLY` with lower confidence
-- This provides the most comprehensive coverage
+- Some, but not all, relevant engine-orchestrated tools are available.
+- CSReview runs available parsed tools and supplements them with detector heuristics and agent review.
+- Tool findings are marked `TOOL-ONLY`; detector+tool agreement is deduplicated and promoted to `CONFIRMED`.
+- Missing relevant tools must be disclosed in the report.
 
 **The agent MUST inform the user which mode is active and what the implications are.**
 
 #### 0.1 Tool Detection Protocol
 
 At the start of every scan, run detection commands for each tool. Use `RunCommand` or equivalent:
+
+#### 0.1.1 Engine-Orchestrated Tools
+
+These are the tools the npm engine currently invokes and parses deterministically:
+
+| Tool | Engine behavior |
+|------|-----------------|
+| Semgrep | Runs `semgrep --config auto --json --quiet <project_path>` and parses findings |
+| npm audit | Runs `npm audit --json` when `package.json` exists and parses dependency findings |
+| OSV-Scanner | Runs `osv-scanner scan --format json <project_path>` and parses dependency findings |
+| Local DAST | Optional post-remediation local-only complement via `--local-dast-url`, writing separate reports |
+
+#### 0.1.2 Agent-Recommended Stack-Native Tools
+
+The tools below are recommended for agent-assisted validation when relevant to the detected stack. They are not parsed by the npm engine unless explicitly listed under Engine-Orchestrated Tools, so their results must be reported as supplemental evidence rather than silently merged into engine counts.
 
 **Detection Commands:**
 ```bash
@@ -1167,9 +1197,9 @@ Systematic verification against OWASP Application Security Verification Standard
 - **Data Minimization**: Collection limited to stated purposes
 - **Retention Schedules**: Documented retention periods per data category
 
-### Phase 7: Vibe Coding Protection
+### Phase 7: Vibe Coding Heuristics
 
-Specific analysis for code generated by AI coding agents (vibe coding) which often introduces security vulnerabilities due to non-expert users building software.
+Specific heuristic analysis for vulnerability patterns commonly seen in AI-assisted code. CSReview does not prove AI authorship and does not perform deterministic authorship attribution. In the npm engine, `vibeRisk` is a static boolean heuristic attached to selected vulnerability patterns so the report can prioritize issues that commonly appear in rushed agent-generated code.
 
 #### 7.1 AI-Generated Code Patterns to Detect
 
@@ -1211,7 +1241,7 @@ Specific analysis for code generated by AI coding agents (vibe coding) which oft
 - Unnecessary dependencies increasing attack surface
 - Mixed package managers (npm + yarn + pnpm)
 
-#### 7.2 AI Agent Behavioral Patterns
+#### 7.2 AI-Assisted Development Anti-Patterns
 
 **Over-Confidence in Security:**
 - "This is secure" comments without actual security measures
@@ -1234,16 +1264,14 @@ Specific analysis for code generated by AI coding agents (vibe coding) which oft
 - Outdated security patterns (MD5, DES, RC4)
 - Hardcoded example credentials from documentation
 
-#### 7.3 Vibe Coding Risk Scoring
+#### 7.3 Vibe Coding Heuristic Labels
 
-Each finding includes a "Vibe Risk" score indicating how likely it was introduced by AI-assisted development:
+Each finding may include a "Vibe Risk" flag indicating that the vulnerability matches a pattern often introduced during AI-assisted development. This is a static boolean heuristic in the engine and a prioritization hint for the agent; it does not prove AI authorship.
 
-| Risk Level | Description | Indicator |
-|------------|-------------|-----------|
-| **AI-Likely** | Pattern commonly generated by AI agents | Classic AI anti-pattern with no security consideration |
-| **AI-Possible** | Could be AI-generated or human oversight | Common mistake that AI agents frequently make |
-| **Human-Likely** | More likely a deliberate (though poor) choice | Intentional but insecure design decision |
-| **Uncertain** | Cannot determine origin | Ambiguous pattern |
+| Label | Meaning | Limit |
+|-------|---------|-------|
+| **Vibe Risk: Yes** | Pattern commonly appears in rushed or AI-assisted code | Not authorship evidence |
+| **Vibe Risk: No** | Pattern is not tagged as a vibe-coding heuristic | Not proof the code is human-written |
 
 ### Phase 8: Report Generation
 
@@ -1357,7 +1385,7 @@ For each vulnerability found:
           <span>Category: Injection</span>
           <span>Location: src/auth.ts:45</span>
           <span>CWE: CWE-89</span>
-          <span>Vibe Risk: AI-Likely</span>
+          <span>Vibe Risk: Yes</span>
           <span>Compliance: OWASP ASVS V5.3, GDPR Art.32</span>
         </div>
         <div class="finding-content">
@@ -1448,7 +1476,7 @@ This report is structured for humans and AI coding agents to parse, understand, 
 **OWASP ASVS Coverage**: [percentage]%
 **Total Findings**: [count]
 **Critical**: [count] | **High**: [count] | **Medium**: [count] | **Low**: [count] | **Info**: [count]
-**Vibe Coding Risk**: [AI-Likely: count] | [AI-Possible: count] | [Human-Likely: count]
+**Vibe Coding Heuristics**: [Vibe Risk: count] | [Not flagged: count]
 
 ---
 
@@ -1456,8 +1484,8 @@ This report is structured for humans and AI coding agents to parse, understand, 
 
 | ID | Severity | Category | File | Line | Issue | Vibe Risk | Compliance |
 |----|----------|----------|------|------|-------|-----------|------------|
-| 001 | CRITICAL | SQL Injection | src/auth.ts | 45 | Raw SQL query with user input | AI-Likely | ASVS V5.3, GDPR Art.32 |
-| 002 | HIGH | XSS | src/components/UserInput.vue | 12 | Unsanitized v-html binding | AI-Likely | ASVS V5.2, LGPD Art.46 |
+| 001 | CRITICAL | SQL Injection | src/auth.ts | 45 | Raw SQL query with user input | Vibe Risk: Yes | ASVS V5.3, GDPR Art.32 |
+| 002 | HIGH | XSS | src/components/UserInput.vue | 12 | Unsanitized v-html binding | Vibe Risk: Yes | ASVS V5.2, LGPD Art.46 |
 | ... | ... | ... | ... | ... | ... | ... | ... |
 
 ---
@@ -1472,7 +1500,7 @@ This report is structured for humans and AI coding agents to parse, understand, 
 **File**: `src/auth.ts`
 **Line**: 45
 **Status**: PENDING
-**Vibe Risk**: AI-Likely
+**Vibe Risk**: Yes
 **Compliance**: OWASP ASVS V5.3, GDPR Art.32, LGPD Art.46, SOC 2 CC6.1
 
 #### Description
@@ -1615,15 +1643,15 @@ const result = await db.query(query, [email, password]);
 
 ## Vibe Coding Assessment
 
-### AI-Likely Vulnerabilities
-Findings with high probability of being introduced by AI coding agents:
+### Vibe-Risk Findings
+Findings matching vulnerability patterns that commonly appear in rushed or AI-assisted code. This does not prove AI authorship.
 
-| ID | Pattern | Risk Level | Recommendation |
-|----|---------|------------|----------------|
-| 001 | String concatenation SQL | AI-Likely | Replace with parameterized queries |
-| 003 | MD5 password hashing | AI-Likely | Switch to bcrypt/Argon2 |
+| ID | Pattern | Heuristic | Recommendation |
+|----|---------|-----------|----------------|
+| 001 | String concatenation SQL | Vibe Risk: Yes | Replace with parameterized queries |
+| 003 | MD5 password hashing | Vibe Risk: Yes | Switch to bcrypt/Argon2 |
 
-### AI Code Quality Score
+### AI-Assisted Code Quality Notes
 - **Security Awareness**: [Low/Medium/High]
 - **Common AI Anti-Patterns Found**: [count]
 - **Recommendation**: [brief guidance for the user]
@@ -1641,7 +1669,7 @@ Apply fixes in this order:
 5. **INFO findings last**: Recommendations, documentation updates
 
 Within each severity, prioritize by:
-1. AI-Likely vulnerabilities (most likely to be widespread if generated by AI)
+1. Vibe-risk findings (patterns often repeated in rushed or AI-assisted code)
 2. Compliance-critical findings (regulatory violations)
 3. Database security issues
 4. Supply chain concerns
@@ -1832,7 +1860,7 @@ When invoked, follow these steps:
 7. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
 8. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
 9. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
-10. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
+10. **Phase 7 - Vibe Coding**: Flag static heuristics for vulnerability patterns commonly seen in rushed or AI-assisted code
 11. **Progress updates**: Keep user informed of analysis progress throughout
 12. **Phase 8 - Report Generation**: Create BOTH reports:
     - `csreview-reports/<agent>_security-report.html` (visual report in user's language for human review)
@@ -2051,42 +2079,30 @@ Security vulnerabilities cost companies billions annually. Most development team
 | 4 | **SLSA 3 Supply Chain** | Source integrity, build integrity, dependency security, deployment security |
 | 5 | **OWASP ASVS** | V1-V14 verification categories (Architecture, Auth, Session, Access, Crypto, etc.) |
 | 6 | **Compliance** | LGPD, GDPR, SOC 2 Type II, HIPAA, CCPA/CPRA regulatory analysis |
-| 7 | **Vibe Coding** | AI-generated code pattern detection, risk scoring, behavioral analysis |
+| 7 | **Vibe Coding** | Static heuristics for vulnerability patterns commonly seen in rushed or AI-assisted code |
 | 8 | **Report Generation** | HTML (user language) + MD (English for agents) dual report system |
 | 9 | **Optional Local DAST** | Complementary post-remediation local-only dynamic checks against `localhost`/`127.0.0.1` after explicit user confirmation |
 
 ### Analysis Modes
 
-CSReview operates in one of three modes depending on installed tools:
+CSReview operates in one of three engine modes depending on the deterministic tools it can invoke and parse:
 
 | Mode | Tools Installed | Accuracy | Confidence | Recommended For |
 |------|----------------|----------|------------|-----------------|
-| **Self-Hosted** | All/most tools installed locally | Highest | CONFIRMED/TOOL-ONLY | Production audits, compliance |
-| **Hybrid** | Some tools installed | High | Mixed CONFIRMED + AI-ONLY | Development, CI/CD |
-| **Agent-Only** | No tools installed | Lower | AI-ESTIMATED only | Quick checks, learning |
+| **Self-Hosted** | All relevant engine-orchestrated tools available locally | Highest | CONFIRMED/TOOL-ONLY | Local release gates, compliance prep |
+| **Hybrid** | Some engine-orchestrated tools available | High | Mixed CONFIRMED + TOOL-ONLY + heuristic | Development, CI/CD |
+| **Agent-Only** | No engine-orchestrated tools available | Lower | Heuristic only | Quick checks, learning |
 
-**Supported Security Tools:**
-| Tool | Purpose | Languages |
-|------|---------|-----------|
-| **Semgrep** | Static analysis (SAST) | 30+ languages |
-| **OSV-Scanner** | Dependency vulnerability scanning | npm, pip, Maven, Go, Cargo, RubyGems, NuGet, OS packages, containers |
-| **Bandit** | Python security linter | Python |
-| **Trivy** | Vulnerability + misconfig scanner | All (deps, containers, IaC) |
-| **Snyk** | Dependency vulnerabilities | All |
-| **Gosec** | Go security linter | Go |
-| **ESLint Security** | JS/TS security rules | JavaScript, TypeScript |
-| **CodeQL** | Semantic code analysis | JS, TS, Python, Go, Java, C#, C++ |
-| **pip-audit** | Python dependency audit | Python |
-| **cargo audit** | Rust dependency audit | Rust |
-| **npm audit** | Node.js dependency audit | JavaScript, TypeScript |
-| **dotnet** | .NET dependency audit | C#, .NET |
-| **Checkov** | Infrastructure-as-code security | Terraform, CloudFormation, K8s |
-| **Hadolint** | Dockerfile security | Docker |
-| **Brakeman** | Rails security scanner | Ruby |
-| **Grype** | Container/filesystem vulnerabilities | All |
-| **RetireJS** | JS library vulnerabilities | JavaScript |
-| **Safety** | Python dependency checker | Python |
-| **OWASP Dep-Check** | Dependency vulnerability check | Java, .NET, Node.js |
+**Engine-Orchestrated Tools:**
+| Tool | Engine behavior |
+|------|-----------------|
+| **Semgrep** | Invoked and parsed as SAST baseline |
+| **npm audit** | Invoked and parsed for Node.js dependency advisories when `package.json` exists |
+| **OSV-Scanner** | Invoked and parsed for multi-ecosystem dependency advisories |
+| **Local DAST** | Optional post-remediation local-only complement with separate reports |
+
+**Agent-Recommended Stack-Native Tools:**
+Bandit, Trivy, Snyk, Gosec, ESLint security plugins, CodeQL, pip-audit, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Brakeman, Grype, RetireJS, Safety, and OWASP Dependency-Check are recommended when relevant to the detected stack. They are not parsed by the npm engine unless explicitly added to the engine-orchestrated list, so their results should be treated as supplemental evidence in agent reports.
 
 ### Built-in Code Review System
 
@@ -2122,7 +2138,7 @@ CSReview includes a complete code review system - no additional skills or plugin
 | **Business Logic** | Race conditions, Mass assignment, Deserialization flaws |
 | **Supply Chain** | SLSA 3: Signed commits, build provenance, SBOM, artifact signing |
 | **Compliance** | LGPD, GDPR, SOC 2, HIPAA, CCPA/CPRA gap analysis |
-| **Vibe Coding** | AI-generated code anti-patterns, risk scoring |
+| **Vibe Coding** | Static boolean heuristic for patterns commonly seen in rushed or AI-assisted code; it does not prove AI authorship |
 
 ### Supported Technologies
 
@@ -2181,7 +2197,7 @@ CSReview includes a complete code review system - no additional skills or plugin
 2. **`csreview-reports/<agent>_security-findings.md`** - Structured report for AI agents (always in English)
    - Machine-readable findings
    - Exact file paths and line numbers
-   - Vibe Risk scoring (AI-Likely, AI-Possible, Human-Likely)
+   - Vibe-risk heuristic flags, not deterministic authorship scoring
    - Compliance mapping per finding
    - Database security findings (SQL/NoSQL/BaaS)
    - SLSA assessment
@@ -2242,7 +2258,7 @@ Copy-Item -Recurse -Force .\csreview\* "$env:USERPROFILE\.codex\skills\csreview"
 
 ### External Security Tools
 
-CSReview works standalone, but installing external tools enhances accuracy and provides additional validation layers. When tools are installed, CSReview operates in **Self-Hosted** or **Hybrid** mode with higher confidence levels. The npm package declares these tools in its `csreview` metadata:
+CSReview works standalone, but installing external tools enhances accuracy and provides additional validation layers. When Semgrep, OSV-Scanner, and npm audit where relevant are available, CSReview can operate in **Self-Hosted** engine mode; otherwise it reports **Hybrid** or **Agent-Only** based on the parsed tools available. The npm package declares these tools in its `csreview` metadata:
 
 - Required external tool: `semgrep`
 - Recommended external tools: `osv-scanner`, `npm audit`
@@ -2471,11 +2487,10 @@ Phase 6: Regulatory Compliance Analysis
   - HIPAA (US Health)
   - CCPA/CPRA (California)
 
-Phase 7: Vibe Coding Protection
-  - AI-generated code pattern detection
-  - Risk scoring (AI-Likely, AI-Possible, Human-Likely)
-  - Behavioral pattern analysis
-  - Common AI anti-pattern identification
+Phase 7: Vibe Coding Heuristics
+  - Static vulnerability patterns commonly seen in rushed or AI-assisted code
+  - Boolean vibe-risk flags, not authorship proof
+  - Common insecure AI-assisted development anti-pattern identification
 
 Phase 8: Report Generation
   - HTML report (user language) for human review
