@@ -36,7 +36,7 @@ const VULNERABILITY_PATTERNS = [
   { id: 'COMMAND_INJECTION', severity: 'CRITICAL', category: 'Injection', name: 'OS Command Injection', description: 'System command execution with user-controlled input.', regex: /(?:^|[^\w.])(?:child_process\.)?(?:exec|execSync|spawn|spawnSync)\s*\(\s*[^)]*(?:req\.|params\.|query\.|body\.|input|args|user|ctx\.)/gi, cwe: 'CWE-78', owasp: 'A03:2021-Injection', fix: 'Use execFile with explicit args array.', exploitation: 'Attacker injects "; rm -rf /" through user input.', confidence: 'HIGH', vibeRisk: true, references: ['https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html'] },
   { id: 'COMMAND_INJECTION_EXEC', severity: 'CRITICAL', category: 'Injection', name: 'Command Injection via exec()', description: 'Dynamic command execution with user input.', regex: /(?:^|[^\w.])(?:exec|eval|system)\s*\(\s*(?:`[^`]*\$\{|['"][^'"]*['"]\s*\+|.*?\.format\s*\()/gi, cwe: 'CWE-78', owasp: 'A03:2021-Injection', fix: 'Avoid dynamic commands. Use library APIs.', exploitation: 'Attacker crafts input appending shell commands for RCE.', confidence: 'HIGH', vibeRisk: true, references: ['https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html'] },
   { id: 'SSTI', severity: 'CRITICAL', category: 'Injection', name: 'Server-Side Template Injection', description: 'User input embedded in template rendering.', regex: /(?:render_template_string|render\s*\(\s*`|Template\s*\(\s*['"]?\s*\+|Jinja2.*?\{\{.*?req\.|pug.*?\#\{.*?req)/gi, cwe: 'CWE-1336', owasp: 'A03:2021-Injection', fix: 'Use template files with context variables.', exploitation: 'Attacker injects {{config.items()}} for RCE.', confidence: 'HIGH', vibeRisk: true, references: ['https://portswigger.net/web-security/server-side-template-injection'] },
-  { id: 'LDAP_INJECTION', severity: 'HIGH', category: 'Injection', name: 'LDAP Injection', description: 'LDAP filter with unsanitized user input.', regex: /(?:ldap|LDAP).*?(?:filter|search|query)\s*\(\s*[^)]*(?:\+|`|\$\{|\.format)/gi, cwe: 'CWE-90', owasp: 'A03:2021-Injection', fix: 'Use parameterized LDAP queries.', exploitation: 'Attanger injects *)(uid=*))(|(uid=* to bypass auth.', confidence: 'MEDIUM', vibeRisk: true, references: ['https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html'] },
+  { id: 'LDAP_INJECTION', severity: 'HIGH', category: 'Injection', name: 'LDAP Injection', description: 'LDAP filter with unsanitized user input.', regex: /(?:ldap|LDAP).*?(?:filter|search|query)\s*\(\s*[^)]*(?:\+|`|\$\{|\.format)/gi, cwe: 'CWE-90', owasp: 'A03:2021-Injection', fix: 'Use parameterized LDAP queries.', exploitation: 'Attacker injects *)(uid=*))(|(uid=* to bypass auth.', confidence: 'MEDIUM', vibeRisk: true, references: ['https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html'] },
   { id: 'XPATH_INJECTION', severity: 'HIGH', category: 'Injection', name: 'XPath Injection', description: 'XPath query with unsanitized user input.', regex: /(?:xpath|XPath).*?(?:select|evaluate|compile)\s*\(\s*[^)]*(?:\+|`|\$\{|\.format)/gi, cwe: 'CWE-91', owasp: 'A03:2021-Injection', fix: 'Use parameterized XPath queries.', exploitation: 'Attacker injects " or "1"="1 to bypass auth.', confidence: 'MEDIUM', vibeRisk: true, references: ['https://cheatsheetseries.owasp.org/cheatsheets/XSS_Prevention_Cheat_Sheet.html'] },
   { id: 'XML_XXE', severity: 'CRITICAL', category: 'Injection', name: 'XML External Entity (XXE)', description: 'XML parsing without disabling external entities.', regex: /(?:libxml|xml2js|DOMParser|XMLParser|SAXParser|lxml|etree).*?(?!.*(?:noent|nonet|dtdload|noDTDload|resolveEntities\s*[=:]\s*(?:false|0)))/gi, cwe: 'CWE-611', owasp: 'A05:2021-Security Misconfiguration', fix: 'Disable external entity processing.', exploitation: 'Attacker submits XXE payload to read server files.', confidence: 'MEDIUM', vibeRisk: false, references: ['https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html'] },
   { id: 'TEMPLATE_INJECTION_EVAL', severity: 'CRITICAL', category: 'Injection', name: 'Code Injection via eval()', description: 'eval() or new Function() with dynamic input.', regex: /(?:eval|new\s+Function)\s*\(\s*(?:`|\+|req\.|params\.|query\.|body\.|input|user|args|ctx\.)/gi, cwe: 'CWE-95', owasp: 'A03:2021-Injection', fix: 'Remove eval(). Use JSON.parse() for data.', exploitation: 'Attacker sends malicious JS through user input for RCE.', confidence: 'HIGH', vibeRisk: true, references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval#never_use_eval!'] },
@@ -194,6 +194,22 @@ function shouldRedactPattern(pattern) {
     || /secret|password|passwd|pwd|token|credential|api.?key|private.?key|access.?key|jwt.?weak.?secret/i.test(`${pattern.id} ${pattern.name}`);
 }
 
+function snippetAroundMatch(line, match, maxLength = 2000) {
+  const text = String(line || '').trim();
+  if (text.length <= maxLength) return text;
+  const matchText = match?.[0] || '';
+  const matchIndex = matchText ? text.indexOf(matchText) : -1;
+  if (matchIndex === -1) {
+    return `${text.slice(0, maxLength - 3)}...`;
+  }
+  const context = Math.max(0, Math.floor((maxLength - matchText.length - 6) / 2));
+  const start = Math.max(0, matchIndex - context);
+  const end = Math.min(text.length, matchIndex + matchText.length + context);
+  const prefix = start > 0 ? '...' : '';
+  const suffix = end < text.length ? '...' : '';
+  return `${prefix}${text.slice(start, end)}${suffix}`;
+}
+
 export function detectSecrets(content, filePath) {
   const findings = [];
   const lines = content.split('\n');
@@ -201,7 +217,7 @@ export function detectSecrets(content, filePath) {
   for (const pattern of SECRET_PATTERNS) {
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       const line = lines[lineIdx];
-      if (!line || line.length > 2000) continue;
+      if (!line) continue;
 
       pattern.regex.lastIndex = 0;
       let match;
@@ -263,7 +279,7 @@ function detectInContent(content, filePath, language) {
           description: pattern.description,
           file: filePath,
           line: lineIdx + 1,
-          vulnerableCode: shouldRedactPattern(pattern) ? redactFindingLine(line, match) : line.trim(),
+          vulnerableCode: shouldRedactPattern(pattern) ? redactFindingLine(line, match) : snippetAroundMatch(line, match),
           cwe: pattern.cwe,
           owasp: pattern.owasp,
           vibeRisk: pattern.vibeRisk,

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { detectSecrets, detectVulnerabilities } from '../src/detector.js';
 import {
+  classifyToolMode,
   deduplicateFindings,
   normalizeNpmAuditFindings,
   normalizeOsvScannerFindings,
@@ -83,6 +84,16 @@ test('secret findings use the report schema and redact secret values', () => {
   assert.equal(findings[0].name, 'Hardcoded API Key');
   assert.equal(findings[0].fix, 'Move to env vars. Rotate the key.');
   assert.match(findings[0].vulnerableCode, /\[REDACTED/);
+  assert.doesNotMatch(findings[0].vulnerableCode, new RegExp(rawSecret));
+});
+
+test('secret detection scans long single-line bundled files without exposing secret values', () => {
+  const rawSecret = 'abcdefghijklmnop12345678';
+  const content = `${'x'.repeat(3000)} const apiKey = "${rawSecret}";`;
+  const findings = detectSecrets(content, 'dist/bundle.js');
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].line, 1);
   assert.doesNotMatch(findings[0].vulnerableCode, new RegExp(rawSecret));
 });
 
@@ -229,6 +240,36 @@ test('local DAST writes complementary reports with commands and dynamic statuses
   assert.match(markdown, /DAST-SUSPECTED/);
   assert.match(markdown, /access-control-allow-origin: https:\/\/evil\.com/i);
   assert.match(html, /Dynamic Analysis \(DAST\) - Local Complementary Report/);
+});
+
+test('tool mode classifier exposes real self-hosted, hybrid, and agent-only states', () => {
+  const available = { available: true };
+  const missing = { available: false };
+  const skipped = { available: false, skipped: true };
+
+  assert.equal(classifyToolMode({
+    semgrep: available,
+    npmAudit: available,
+    osvScanner: available,
+  }), 'Self-Hosted');
+
+  assert.equal(classifyToolMode({
+    semgrep: available,
+    npmAudit: skipped,
+    osvScanner: available,
+  }), 'Self-Hosted');
+
+  assert.equal(classifyToolMode({
+    semgrep: available,
+    npmAudit: missing,
+    osvScanner: missing,
+  }), 'Hybrid');
+
+  assert.equal(classifyToolMode({
+    semgrep: missing,
+    npmAudit: skipped,
+    osvScanner: missing,
+  }), 'Agent-Only');
 });
 
 test('shared scoring counts config-only findings against audited files', () => {
@@ -495,6 +536,49 @@ test('skill permits only explicit complementary local DAST after remediation', (
   assert.match(docs, /csreview-reports\/<agent>_local-dast-report\.html/);
   assert.match(docs, /DAST-SUSPECTED|DAST-CLEAN|DAST-CONFIRMED/);
   assert.doesNotMatch(docs, /DROP TABLE/i);
+});
+
+test('documentation separates engine-orchestrated tools from agent-recommended tools honestly', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Engine-Orchestrated Tools/i);
+  assert.match(docs, /Semgrep[\s\S]*npm audit[\s\S]*OSV-Scanner/i);
+  assert.match(docs, /Agent-Recommended Stack-Native Tools/i);
+  assert.match(docs, /not parsed by the npm engine/i);
+  assert.match(docs, /Self-Hosted[\s\S]*all relevant engine-orchestrated tools/i);
+  assert.doesNotMatch(docs, /Supports 18 tools/i);
+});
+
+test('documentation describes vibe coding as heuristics rather than deterministic authorship scoring', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Vibe Coding Heuristics/i);
+  assert.match(docs, /does not prove AI authorship/i);
+  assert.match(docs, /static boolean heuristic/i);
+  assert.doesNotMatch(docs, /behavioral analysis/i);
+});
+
+test('skill defines compatible scatter-gather security subagent orchestration', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Scatter-Gather Security Subagent Orchestration/i);
+  assert.match(docs, /Phase 0[\s\S]*Phase 1[\s\S]*sequential gate/i);
+  assert.match(docs, /compatibility-gated fan-out/i);
+  assert.match(docs, /single writer/i);
+  assert.match(docs, /canonical finding schema/i);
+  assert.match(docs, /source: "subagent:/);
+  assert.match(docs, /run SAST\/SCA tools once/i);
+  assert.match(docs, /cached tool output/i);
+  assert.match(docs, /fallback to sequential/i);
+});
+
+test('code and docs do not contain stale typo or Semgrep generic report excludes', () => {
+  const detector = fs.readFileSync('src/detector.js', 'utf8');
+  const index = fs.readFileSync('src/index.js', 'utf8');
+
+  assert.doesNotMatch(detector, /Attanger/);
+  assert.doesNotMatch(index, /'security-report\.html'/);
+  assert.doesNotMatch(index, /'security-findings\.md'/);
 });
 
 test('README exposes the canonical SKILL.md for GitHub landing review', () => {
