@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import chalk from 'chalk';
@@ -8,13 +9,14 @@ import { runLocalDast } from './localDast.js';
 const args = process.argv.slice(2);
 
 if (args.includes('--doctor')) {
-  const targetArg = args.find(arg => !arg.startsWith('-'));
+  const targetArg = args.find((arg) => !arg.startsWith('-'));
   const targetDir = resolve(targetArg || '.');
   const tools = await checkExternalTools(targetDir);
 
   console.log(chalk.bold.cyan('\n  CSReview Tool Doctor\n'));
   console.log(`  Target: ${targetDir}\n`);
 
+  /** @type {Array<[string, {available: boolean, version?: string, reason?: string, error?: string}, string]>} */
   const rows = [
     ['Semgrep', tools.semgrep, 'required'],
     ['npm audit', tools.npmAudit, 'recommended for Node.js'],
@@ -84,17 +86,17 @@ let agentName = process.env.CSREVIEW_AGENT_NAME || 'codex';
 let localDastUrl = null;
 const strictPartials = args.includes('--strict-partials');
 
-const outputIdx = args.findIndex(a => a === '--output' || a === '-o');
+const outputIdx = args.findIndex((a) => a === '--output' || a === '-o');
 if (outputIdx !== -1 && args[outputIdx + 1]) {
   outputDir = resolve(args[outputIdx + 1]);
 }
 
-const agentNameIdx = args.findIndex(a => a === '--agent-name');
+const agentNameIdx = args.findIndex((a) => a === '--agent-name');
 if (agentNameIdx !== -1 && args[agentNameIdx + 1]) {
   agentName = args[agentNameIdx + 1];
 }
 
-const localDastIdx = args.findIndex(a => a === '--local-dast-url');
+const localDastIdx = args.findIndex((a) => a === '--local-dast-url');
 if (localDastIdx !== -1 && args[localDastIdx + 1]) {
   localDastUrl = args[localDastIdx + 1];
 }
@@ -122,26 +124,36 @@ try {
   console.log(`  Analysis Mode:  ${result.toolResults?.mode || 'Agent-Only'}`);
 
   if (result.toolResults?.semgrep?.available) {
-    console.log(`  Semgrep:        ${result.toolResults.semgrep.version} (${result.toolResults.semgrep.rawCount} findings)`);
+    console.log(
+      `  Semgrep:        ${result.toolResults.semgrep.version} (${result.toolResults.semgrep.rawCount} findings)`,
+    );
   } else {
-    console.log(`  Semgrep:        REQUIRED but unavailable (${result.toolResults?.semgrep?.error || result.toolResults?.semgrep?.reason || 'not run'})`);
+    console.log(
+      `  Semgrep:        REQUIRED but unavailable (${result.toolResults?.semgrep?.error || result.toolResults?.semgrep?.reason || 'not run'})`,
+    );
   }
 
   if (result.toolResults?.npmAudit?.available) {
-    console.log(`  npm audit:      ${result.toolResults.npmAudit.version} (${result.toolResults.npmAudit.rawCount} findings)`);
+    console.log(
+      `  npm audit:      ${result.toolResults.npmAudit.version} (${result.toolResults.npmAudit.rawCount} findings)`,
+    );
   } else if (result.toolResults?.npmAudit?.reason) {
     console.log(`  npm audit:      skipped (${result.toolResults.npmAudit.reason})`);
   }
 
   if (result.toolResults?.osvScanner?.available) {
-    console.log(`  OSV-Scanner:    ${result.toolResults.osvScanner.version} (${result.toolResults.osvScanner.rawCount} findings)`);
+    console.log(
+      `  OSV-Scanner:    ${result.toolResults.osvScanner.version} (${result.toolResults.osvScanner.rawCount} findings)`,
+    );
   } else if (result.toolResults?.osvScanner?.error) {
     console.log(`  OSV-Scanner:    recommended but unavailable (${result.toolResults.osvScanner.error})`);
   }
 
   if (result.partialReconciliation?.status && !['skipped', 'empty'].includes(result.partialReconciliation.status)) {
     const reconciliationLabel = result.partialReconciliation.ok ? chalk.green('OK') : chalk.red.bold('FAILED');
-    console.log(`  Partials:       ${reconciliationLabel} (${result.partialReconciliation.partialFindingCount} partial findings)`);
+    console.log(
+      `  Partials:       ${reconciliationLabel} (${result.partialReconciliation.partialFindingCount} partial findings)`,
+    );
     for (const error of result.partialReconciliation.errors || []) {
       console.log(chalk.red(`    - ${error}`));
     }
@@ -176,7 +188,11 @@ try {
   if (localDastUrl) {
     console.log(chalk.bold('\n  Running Local DAST Complement\n'));
     console.log(chalk.yellow('  Local test environment only. Never use this against production.'));
-    console.log(chalk.yellow('  If this test uses a database copy, keep it deliberate, local, secure, and sanitized/minimized where needed.'));
+    console.log(
+      chalk.yellow(
+        '  If this test uses a database copy, keep it deliberate, local, secure, and sanitized/minimized where needed.',
+      ),
+    );
     console.log(chalk.gray('  Purpose: White Hat Hacker-style analysis and remediation of security flaws.\n'));
     const localDast = await runLocalDast(targetDir, {
       targetUrl: localDastUrl,
@@ -184,8 +200,8 @@ try {
       agentName,
       outputDir: resolve(targetDir, 'csreview-reports'),
     });
-    const suspected = localDast.results.filter(item => item.status === 'DAST-SUSPECTED').length;
-    const clean = localDast.results.filter(item => item.status === 'DAST-CLEAN').length;
+    const suspected = localDast.results.filter((item) => item.status === 'DAST-SUSPECTED').length;
+    const clean = localDast.results.filter((item) => item.status === 'DAST-CLEAN').length;
     console.log(`  Target:         ${localDast.target}`);
     console.log(`  DAST-SUSPECTED: ${suspected}`);
     console.log(`  DAST-CLEAN:     ${clean}`);
@@ -194,7 +210,11 @@ try {
     console.log(`    ${chalk.cyan('MD')}    ${localDast.reports.markdown}`);
   } else {
     console.log(chalk.gray('\n  After remediating findings, you may run optional local-only DAST:'));
-    console.log(chalk.gray(`  csreview ${targetDir} --local-dast-url http://localhost:3000 --confirm-local-dast --agent-name ${agentName}`));
+    console.log(
+      chalk.gray(
+        `  csreview ${targetDir} --local-dast-url http://localhost:3000 --confirm-local-dast --agent-name ${agentName}`,
+      ),
+    );
   }
 
   console.log('');

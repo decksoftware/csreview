@@ -1,3 +1,4 @@
+// @ts-check
 import fs from 'fs';
 import path from 'path';
 import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
@@ -5,18 +6,39 @@ import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
 const EXTENSION_LANGUAGE_MAP = {
-  '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
-  '.ts': 'typescript', '.tsx': 'typescript', '.jsx': 'javascript',
-  '.py': 'python', '.java': 'java', '.go': 'go', '.rs': 'rust',
-  '.php': 'php', '.rb': 'ruby', '.cs': 'csharp', '.c': 'c',
-  '.cpp': 'cpp', '.h': 'c', '.hpp': 'cpp', '.swift': 'swift',
-  '.kt': 'kotlin', '.dart': 'dart', '.vue': 'html', '.html': 'html',
-  '.sql': 'sql', '.sh': 'bash', '.ps1': 'powershell',
-  '.pas': 'pascal', '.pp': 'pascal', '.dpr': 'pascal', '.lpr': 'pascal'
+  '.js': 'javascript',
+  '.mjs': 'javascript',
+  '.cjs': 'javascript',
+  '.ts': 'typescript',
+  '.tsx': 'typescript',
+  '.jsx': 'javascript',
+  '.py': 'python',
+  '.java': 'java',
+  '.go': 'go',
+  '.rs': 'rust',
+  '.php': 'php',
+  '.rb': 'ruby',
+  '.cs': 'csharp',
+  '.c': 'c',
+  '.cpp': 'cpp',
+  '.h': 'c',
+  '.hpp': 'cpp',
+  '.swift': 'swift',
+  '.kt': 'kotlin',
+  '.dart': 'dart',
+  '.vue': 'html',
+  '.html': 'html',
+  '.sql': 'sql',
+  '.sh': 'bash',
+  '.ps1': 'powershell',
+  '.pas': 'pascal',
+  '.pp': 'pascal',
+  '.dpr': 'pascal',
+  '.lpr': 'pascal',
 };
 
 const OWASP_CATEGORY_MAP = {
-  'Injection': 'A03:2021',
+  Injection: 'A03:2021',
   'Broken Authentication': 'A07:2021',
   'Sensitive Data Exposure': 'A02:2021',
   'XML External Entities': 'A05:2021',
@@ -29,15 +51,15 @@ const OWASP_CATEGORY_MAP = {
   'Supply Chain': 'A08:2021',
   'Memory Safety': 'A06:2021',
   'Data Leakage': 'A09:2021',
-  'Cryptography': 'A02:2021',
-  'Authentication': 'A07:2021',
+  Cryptography: 'A02:2021',
+  Authentication: 'A07:2021',
   'Using Components with Known Vulnerabilities': 'A06:2021',
   'Insufficient Logging & Monitoring': 'A09:2021',
   'Server-Side Request Forgery': 'A10:2021',
   'Cryptographic Failures': 'A02:2021',
   'Identification and Authentication Failures': 'A07:2021',
   'Software and Data Integrity Failures': 'A08:2021',
-  'Security Logging and Monitoring Failures': 'A09:2021'
+  'Security Logging and Monitoring Failures': 'A09:2021',
 };
 
 function readPackageVersion() {
@@ -76,7 +98,7 @@ function getOwaspUrl(owasp) {
       'A07_2021-Identification_and_Authentication_Failures',
       'A08_2021-Software_and_Data_Integrity_Failures',
       'A09_2021-Security_Logging_and_Monitoring_Failures',
-      'A10_2021-Server-Side_Request_Forgery_(SSRF)'
+      'A10_2021-Server-Side_Request_Forgery_(SSRF)',
     ];
     if (num >= 1 && num <= 10) return `https://owasp.org/Top10/${names[num - 1]}/`;
   }
@@ -107,11 +129,12 @@ function groupByCategory(findings) {
 function getRiskAssessment(findings, score) {
   const counts = countBySeverity(findings);
   const categories = Object.keys(groupByCategory(findings));
-  const topCategory = categories.length > 0
-    ? categories.reduce((a, b) =>
-        findings.filter(f => f.category === a).length >= findings.filter(f => f.category === b).length ? a : b
-      )
-    : 'None';
+  const topCategory =
+    categories.length > 0
+      ? categories.reduce((a, b) =>
+          findings.filter((f) => f.category === a).length >= findings.filter((f) => f.category === b).length ? a : b,
+        )
+      : 'None';
 
   if (counts.CRITICAL > 0) {
     return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any release.`;
@@ -154,9 +177,10 @@ function buildExecutiveSummary(findings, score) {
   const topFixes = getTopPriorityFixes(findings, 5);
   const riskAssessment = getRiskAssessment(findings, score);
 
-  const topFixesList = topFixes.length > 0
-    ? topFixes.map((f, i) => `${i + 1}. **${f.name}** (${f.severity}) - \`${f.file}:${f.line}\``).join('\n')
-    : 'No findings to prioritize.';
+  const topFixesList =
+    topFixes.length > 0
+      ? topFixes.map((f, i) => `${i + 1}. **${f.name}** (${f.severity}) - \`${f.file}:${f.line}\``).join('\n')
+      : 'No findings to prioritize.';
 
   return `## Executive Summary
 
@@ -179,9 +203,12 @@ ${topFixesList}`;
 
 function buildFindingsIndex(findings) {
   const sorted = sortBySeverity(findings);
-  const rows = sorted.map(f =>
-    `| ${f.id} | ${f.severity} | ${f.category} | ${f.cwe || 'N/A'} | \`${f.file}\` | ${f.line} | ${f.name} | ${f.confidence || 'N/A'} |`
-  ).join('\n');
+  const rows = sorted
+    .map(
+      (f) =>
+        `| ${f.id} | ${f.severity} | ${f.category} | ${f.cwe || 'N/A'} | \`${f.file}\` | ${f.line} | ${f.name} | ${f.confidence || 'N/A'} |`,
+    )
+    .join('\n');
 
   return `## Findings Index
 
@@ -193,7 +220,7 @@ ${rows}`;
 function buildDetailedFindings(findings) {
   const sorted = sortBySeverity(findings);
 
-  const sections = sorted.map(f => {
+  const sections = sorted.map((f) => {
     const lang = getLanguageFromExtension(f.file);
     const cweLink = f.cwe ? `[${f.cwe}](${getCweUrl(f.cwe)})` : 'N/A';
     const owaspCode = f.owasp || OWASP_CATEGORY_MAP[f.category] || '';
@@ -201,9 +228,8 @@ function buildDetailedFindings(findings) {
     const vibeRiskText = f.vibeRisk ? 'Yes' : 'No';
     const complianceText = f.compliance || 'None specified';
     const exploitationText = f.exploitation || 'No potential exploitation path provided.';
-    const references = f.references && f.references.length > 0
-      ? f.references.map(r => `- ${r}`).join('\n')
-      : `- ${getCweUrl(f.cwe)}`;
+    const references =
+      f.references && f.references.length > 0 ? f.references.map((r) => `- ${r}`).join('\n') : `- ${getCweUrl(f.cwe)}`;
 
     return `---
 
@@ -266,7 +292,7 @@ function buildCategoryAnalysis(findings) {
 No findings to categorize.`;
   }
 
-  const sections = categories.map(category => {
+  const sections = categories.map((category) => {
     const catFindings = groups[category];
     const counts = countBySeverity(catFindings);
     const severityBreakdown = Object.entries(counts)
@@ -274,8 +300,8 @@ No findings to categorize.`;
       .map(([sev, count]) => `${count} ${sev}`)
       .join(', ');
 
-    const fileList = [...new Set(catFindings.map(f => f.file))];
-    const filesAffected = fileList.map(f => `\`${f}\``).join(', ');
+    const fileList = [...new Set(catFindings.map((f) => f.file))];
+    const filesAffected = fileList.map((f) => `\`${f}\``).join(', ');
 
     return `### ${category}
 
@@ -283,7 +309,7 @@ No findings to categorize.`;
 **Severity Breakdown**: ${severityBreakdown}
 **Files Affected**: ${filesAffected}
 
-${catFindings.map(f => `- **${f.id}** (${f.severity}): ${f.name} in \`${f.file}:${f.line}\``).join('\n')}`;
+${catFindings.map((f) => `- **${f.id}** (${f.severity}): ${f.name} in \`${f.file}:${f.line}\``).join('\n')}`;
   });
 
   return `## Category Analysis
@@ -312,31 +338,35 @@ function buildComplianceMapping(findings) {
     }
   }
 
-  const hasDataExposure = findings.some(f =>
-    f.category === 'Sensitive Data Exposure' ||
-    f.category === 'Cryptographic Failures' ||
-    f.category === 'Data Leakage' ||
-    (f.compliance || '').toLowerCase().includes('data')
+  const hasDataExposure = findings.some(
+    (f) =>
+      f.category === 'Sensitive Data Exposure' ||
+      f.category === 'Cryptographic Failures' ||
+      f.category === 'Data Leakage' ||
+      (f.compliance || '').toLowerCase().includes('data'),
   );
 
-  const owaspRows = Object.keys(owaspMap).length > 0
-    ? Object.entries(owaspMap)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([code, ids]) => `| ${code} | FAIL | ${ids.join(', ')} |`)
-        .join('\n')
-    : '| - | PASS | No findings mapped |';
+  const owaspRows =
+    Object.keys(owaspMap).length > 0
+      ? Object.entries(owaspMap)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([code, ids]) => `| ${code} | FAIL | ${ids.join(', ')} |`)
+          .join('\n')
+      : '| - | PASS | No findings mapped |';
 
-  const gdprRows = gdprFindings.length > 0
-    ? gdprFindings.map(f => `| Art.32 | ${f.severity} | ${f.id} |`).join('\n')
-    : hasDataExposure
-      ? '| Art.32 | MEDIUM | General risk |'
-      : '| Art.32 | PASS | No findings mapped |';
+  const gdprRows =
+    gdprFindings.length > 0
+      ? gdprFindings.map((f) => `| Art.32 | ${f.severity} | ${f.id} |`).join('\n')
+      : hasDataExposure
+        ? '| Art.32 | MEDIUM | General risk |'
+        : '| Art.32 | PASS | No findings mapped |';
 
-  const lgpdRows = lgpdFindings.length > 0
-    ? lgpdFindings.map(f => `| Art.46 | ${f.severity} | ${f.id} |`).join('\n')
-    : hasDataExposure
-      ? '| Art.46 | MEDIUM | General risk |'
-      : '| Art.46 | PASS | No findings mapped |';
+  const lgpdRows =
+    lgpdFindings.length > 0
+      ? lgpdFindings.map((f) => `| Art.46 | ${f.severity} | ${f.id} |`).join('\n')
+      : hasDataExposure
+        ? '| Art.46 | MEDIUM | General risk |'
+        : '| Art.46 | PASS | No findings mapped |';
 
   return `## Compliance Impact
 
@@ -371,11 +401,11 @@ function estimateEffort(finding) {
 
 function getImpactSummary(finding) {
   const impacts = {
-    'CRITICAL': 'Remote code execution, full system compromise, or data breach',
-    'HIGH': 'Significant security risk, potential for data exposure or privilege escalation',
-    'MEDIUM': 'Moderate risk, could be chained with other vulnerabilities',
-    'LOW': 'Minor security concern, limited direct impact',
-    'INFO': 'Informational, best practice recommendation'
+    CRITICAL: 'Remote code execution, full system compromise, or data breach',
+    HIGH: 'Significant security risk, potential for data exposure or privilege escalation',
+    MEDIUM: 'Moderate risk, could be chained with other vulnerabilities',
+    LOW: 'Minor security concern, limited direct impact',
+    INFO: 'Informational, best practice recommendation',
   };
   return impacts[finding.severity] || 'Security improvement recommended';
 }
@@ -393,10 +423,10 @@ function fixAvailable(finding) {
 
 function buildFixPriorityOrder(findings) {
   const grouped = {
-    CRITICAL: findings.filter(f => f.severity === 'CRITICAL'),
-    HIGH: findings.filter(f => f.severity === 'HIGH'),
-    MEDIUM: findings.filter(f => f.severity === 'MEDIUM'),
-    LOW: findings.filter(f => f.severity === 'LOW' || f.severity === 'INFO')
+    CRITICAL: findings.filter((f) => f.severity === 'CRITICAL'),
+    HIGH: findings.filter((f) => f.severity === 'HIGH'),
+    MEDIUM: findings.filter((f) => f.severity === 'MEDIUM'),
+    LOW: findings.filter((f) => f.severity === 'LOW' || f.severity === 'INFO'),
   };
 
   const sections = [];
@@ -404,37 +434,45 @@ function buildFixPriorityOrder(findings) {
   if (grouped.CRITICAL.length > 0) {
     sections.push(`### Immediate (CRITICAL)
 
-${grouped.CRITICAL.map((f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
+${grouped.CRITICAL.map(
+  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
    - Impact: ${getImpactSummary(f)}
    - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`).join('\n')}`);
+   - Fix: ${getFixSummary(f)}`,
+).join('\n')}`);
   }
 
   if (grouped.HIGH.length > 0) {
     sections.push(`### Short-term (HIGH)
 
-${grouped.HIGH.map((f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
+${grouped.HIGH.map(
+  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
    - Impact: ${getImpactSummary(f)}
    - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`).join('\n')}`);
+   - Fix: ${getFixSummary(f)}`,
+).join('\n')}`);
   }
 
   if (grouped.MEDIUM.length > 0) {
     sections.push(`### Medium-term (MEDIUM)
 
-${grouped.MEDIUM.map((f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
+${grouped.MEDIUM.map(
+  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
    - Impact: ${getImpactSummary(f)}
    - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`).join('\n')}`);
+   - Fix: ${getFixSummary(f)}`,
+).join('\n')}`);
   }
 
   if (grouped.LOW.length > 0) {
     sections.push(`### Low Priority (LOW/INFO)
 
-${grouped.LOW.map((f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
+${grouped.LOW.map(
+  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
    - Impact: ${getImpactSummary(f)}
    - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`).join('\n')}`);
+   - Fix: ${getFixSummary(f)}`,
+).join('\n')}`);
   }
 
   if (sections.length === 0) {
@@ -457,7 +495,7 @@ function buildAgentInstructions(findings) {
 > **READ-ONLY REPORT**: No vulnerabilities were found. CSReview did not modify the audited project.`;
   }
 
-  const guidance = sorted.map(f => {
+  const guidance = sorted.map((f) => {
     const lang = getLanguageFromExtension(f.file);
     const hasFix = fixAvailable(f);
 
@@ -568,7 +606,7 @@ export function generateMarkdownReport(projectInfo, findings, outputPath, metada
     buildComplianceMapping(safeFindings),
     buildFixPriorityOrder(safeFindings),
     buildAgentInstructions(safeFindings),
-    buildScanMetadata(projectInfo, safeFindings, startTime, metadata)
+    buildScanMetadata(projectInfo, safeFindings, startTime, metadata),
   ];
 
   const report = sections.join('\n\n');

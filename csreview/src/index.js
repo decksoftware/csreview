@@ -1,3 +1,4 @@
+// @ts-check
 import { relative } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -9,9 +10,56 @@ import { generateMarkdownReport } from './reports/markdown.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
+/**
+ * Canonical finding object exchanged by the deterministic engine, tool
+ * normalizers, subagent partials, Markdown report, HTML report, and JSON export.
+ *
+ * @typedef {object} Finding
+ * @property {string} [id]
+ * @property {'CRITICAL'|'HIGH'|'MEDIUM'|'LOW'|'INFO'|string} severity
+ * @property {string} category
+ * @property {string} name
+ * @property {string} [description]
+ * @property {string} file
+ * @property {number} line
+ * @property {string} [vulnerableCode]
+ * @property {string} [cwe]
+ * @property {string} [owasp]
+ * @property {string} [fix]
+ * @property {'DAST-CONFIRMED'|'DAST-SUSPECTED'|'DAST-CLEAN'|'CONFIRMED'|'HIGH'|'MEDIUM'|'LOW'|string} confidence
+ * @property {string} [exploitation]
+ * @property {string[]|Array<{url?: string, advisory?: string}>} [references]
+ * @property {string} [source]
+ * @property {boolean} [vibeRisk]
+ * @property {string} [compliance]
+ * @property {string[]} [sources]
+ * @property {number} [duplicateCount]
+ */
+
+/**
+ * @typedef {object} ToolRunResult
+ * @property {boolean} available
+ * @property {boolean} [required]
+ * @property {string} [version]
+ * @property {string} [error]
+ * @property {string} [reason]
+ * @property {boolean} [skipped]
+ * @property {number} [rawCount]
+ * @property {Finding[]} [findings]
+ */
+
+/**
+ * @typedef {object} ToolResults
+ * @property {string} mode
+ * @property {ToolRunResult} semgrep
+ * @property {ToolRunResult} npmAudit
+ * @property {ToolRunResult} osvScanner
+ */
+
 const execFileAsync = promisify(execFile);
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
 const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'osv-scanner', 'python3', 'python']);
+const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
 
 function executable(command) {
   if (!TOOL_COMMANDS.has(command)) {
@@ -23,55 +71,107 @@ function executable(command) {
   return command;
 }
 
+/**
+ * Execute an allowlisted external tool without a shell except for Windows npm-style
+ * .cmd shims, which require cmd.exe and are guarded against shell metacharacters.
+ *
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('child_process').ExecFileOptions} [options]
+ * @returns {Promise<{stdout: string, stderr: string}>}
+ */
 function execTool(command, args, options = {}) {
   const commandPath = executable(command);
   const needsShell = process.platform === 'win32' && commandPath.endsWith('.cmd');
+  validateWindowsCmdArgs(commandPath, args);
   if (needsShell) {
-    return execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], options);
+    // Invariant: .cmd tools execute through cmd.exe on Windows, so user-controlled
+    // values such as rootDir, targets, agentName, and paths must never be passed
+    // in args for .cmd commands. User input belongs in cwd or direct non-.cmd tools.
+    return /** @type {Promise<{stdout: string, stderr: string}>} */ (
+      execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], options)
+    );
   }
-  return execFileAsync(commandPath, args, options);
+  return /** @type {Promise<{stdout: string, stderr: string}>} */ (execFileAsync(commandPath, args, options));
+}
+
+/**
+ * Reject arguments that would be unsafe if routed through cmd.exe for Windows
+ * .cmd shims. Direct execFile tools on Linux/macOS and non-.cmd tools are unchanged.
+ *
+ * @param {string} commandPath
+ * @param {string[]} args
+ * @param {NodeJS.Platform} [platform]
+ */
+export function validateWindowsCmdArgs(commandPath, args, platform = process.platform) {
+  if (platform !== 'win32' || !String(commandPath).endsWith('.cmd')) {
+    return;
+  }
+
+  const unsafeIndex = (args || []).findIndex((arg) => WINDOWS_CMD_META_CHARS.test(String(arg)));
+  if (unsafeIndex !== -1) {
+    throw new Error(`Unsafe argument for Windows cmd-backed tool ${commandPath} at index ${unsafeIndex}`);
+  }
 }
 
 const LANG_MAP = {
-  'js': 'javascript', 'mjs': 'javascript', 'cjs': 'javascript',
-  'ts': 'typescript', 'tsx': 'typescript', 'jsx': 'javascript',
-  'py': 'python',
-  'java': 'java',
-  'kt': 'kotlin',
-  'go': 'go',
-  'rs': 'rust',
-  'php': 'php',
-  'rb': 'ruby',
-  'cs': 'csharp',
-  'swift': 'swift',
-  'c': 'c',
-  'h': 'c',
-  'cpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp',
-  'pas': 'delphi', 'dpr': 'delphi', 'dpk': 'delphi', 'lpr': 'delphi', 'pp': 'delphi',
-  'vue': 'vue',
-  'svelte': 'svelte',
-  'sh': 'bash', 'bash': 'bash',
-  'sql': 'sql',
-  'graphql': 'graphql', 'gql': 'graphql',
-  'html': 'html', 'htm': 'html',
-  'xml': 'xml',
-  'json': 'json',
-  'yaml': 'yaml', 'yml': 'yaml',
-  'toml': 'toml',
-  'env': 'env',
-  'tf': 'terraform', 'tfvars': 'terraform',
-  'lua': 'lua',
-  'r': 'r', 'R': 'r',
-  'scala': 'scala',
-  'groovy': 'groovy',
-  'ex': 'elixir', 'exs': 'elixir',
-  'erl': 'erlang',
-  'hs': 'haskell',
-  'dart': 'dart',
-  'zig': 'zig',
-  'nim': 'nim',
-  'v': 'v',
-  'sol': 'solidity',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  jsx: 'javascript',
+  py: 'python',
+  java: 'java',
+  kt: 'kotlin',
+  go: 'go',
+  rs: 'rust',
+  php: 'php',
+  rb: 'ruby',
+  cs: 'csharp',
+  swift: 'swift',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  cc: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  pas: 'delphi',
+  dpr: 'delphi',
+  dpk: 'delphi',
+  lpr: 'delphi',
+  pp: 'delphi',
+  vue: 'vue',
+  svelte: 'svelte',
+  sh: 'bash',
+  bash: 'bash',
+  sql: 'sql',
+  graphql: 'graphql',
+  gql: 'graphql',
+  html: 'html',
+  htm: 'html',
+  xml: 'xml',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  env: 'env',
+  tf: 'terraform',
+  tfvars: 'terraform',
+  lua: 'lua',
+  r: 'r',
+  R: 'r',
+  scala: 'scala',
+  groovy: 'groovy',
+  ex: 'elixir',
+  exs: 'elixir',
+  erl: 'erlang',
+  hs: 'haskell',
+  dart: 'dart',
+  zig: 'zig',
+  nim: 'nim',
+  v: 'v',
+  sol: 'solidity',
 };
 
 function getLanguage(filePath) {
@@ -80,18 +180,16 @@ function getLanguage(filePath) {
 }
 
 function enrichFiles(filePaths) {
-  return filePaths.map(fp => ({
+  return filePaths.map((fp) => ({
     path: fp,
     language: getLanguage(fp),
   }));
 }
 
 function uniqueAuditFiles(projectInfo) {
-  return [
-    ...(projectInfo.files || []),
-    ...(projectInfo.configFiles || []),
-    ...(projectInfo.baasFiles || []),
-  ].filter((filePath, index, all) => filePath && all.indexOf(filePath) === index);
+  return [...(projectInfo.files || []), ...(projectInfo.configFiles || []), ...(projectInfo.baasFiles || [])].filter(
+    (filePath, index, all) => filePath && all.indexOf(filePath) === index,
+  );
 }
 
 function formatDuration(ms) {
@@ -101,17 +199,15 @@ function formatDuration(ms) {
 }
 
 function sanitizeAgentName(agentName) {
-  const raw = String(agentName || 'codex').trim().toLowerCase();
+  const raw = String(agentName || 'codex')
+    .trim()
+    .toLowerCase();
   let normalized = '';
   let lastWasGeneratedHyphen = false;
 
   for (const char of raw) {
     const code = char.charCodeAt(0);
-    const isSafeAscii =
-      (code >= 97 && code <= 122) ||
-      (code >= 48 && code <= 57) ||
-      char === '_' ||
-      char === '-';
+    const isSafeAscii = (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || char === '_' || char === '-';
 
     if (isSafeAscii) {
       normalized += char;
@@ -217,12 +313,7 @@ function findingDedupKey(finding) {
   if (cwe) {
     return `${file}:${line}:${cwe}`;
   }
-  return [
-    file,
-    line,
-    normalizeKeyPart(finding?.category),
-    normalizeKeyPart(finding?.name),
-  ].join(':');
+  return [file, line, normalizeKeyPart(finding?.category), normalizeKeyPart(finding?.name)].join(':');
 }
 
 function rankSeverity(severity) {
@@ -234,10 +325,7 @@ function rankConfidence(confidence) {
 }
 
 function mergeReferences(left = [], right = []) {
-  return [...new Set([
-    ...(Array.isArray(left) ? left : []),
-    ...(Array.isArray(right) ? right : []),
-  ].filter(Boolean))];
+  return [...new Set([...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])].filter(Boolean))];
 }
 
 function shouldReplaceFinding(current, incoming) {
@@ -259,7 +347,8 @@ function mergeFindings(current, incoming) {
   ]);
   const primary = shouldReplaceFinding(current, incoming) ? incoming : current;
   const secondary = primary === incoming ? current : incoming;
-  const hasToolAndDetector = sources.has('csreview-detector') && [...sources].some(source => source !== 'csreview-detector');
+  const hasToolAndDetector =
+    sources.has('csreview-detector') && [...sources].some((source) => source !== 'csreview-detector');
 
   return {
     ...primary,
@@ -275,6 +364,13 @@ function mergeFindings(current, incoming) {
   };
 }
 
+/**
+ * Collapse duplicate findings by file, line, and CWE/rule while preserving
+ * cross-source evidence for confidence promotion.
+ *
+ * @param {Finding[]} findings
+ * @returns {Finding[]}
+ */
 export function deduplicateFindings(findings = []) {
   const byKey = new Map();
   for (const finding of findings || []) {
@@ -302,13 +398,12 @@ function isPlainObject(value) {
 }
 
 function normalizeToolName(entry) {
-  const raw = typeof entry === 'string'
-    ? entry
-    : entry?.name || entry?.tool || entry?.command || entry?.id || '';
+  const raw = typeof entry === 'string' ? entry : entry?.name || entry?.tool || entry?.command || entry?.id || '';
   const value = String(raw).trim().toLowerCase();
   if (!value) return '';
   if (value === 'npm' || value === 'npm audit' || value.includes('npm audit')) return 'npm audit';
-  if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner')) return 'osv-scanner';
+  if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner'))
+    return 'osv-scanner';
   if (value.includes('semgrep')) return 'semgrep';
   if (value.includes('trivy')) return 'trivy';
   return value.split(/\s+/)[0];
@@ -379,7 +474,9 @@ function readSubagentPartials(outputDir) {
       result.status = 'failed';
       return result;
     }
-    const fileNames = readdirSync(partialsDir).filter(name => name.toLowerCase().endsWith('.json')).sort();
+    const fileNames = readdirSync(partialsDir)
+      .filter((name) => name.toLowerCase().endsWith('.json'))
+      .sort();
     if (fileNames.length === 0) {
       return result;
     }
@@ -423,6 +520,13 @@ function readSubagentPartials(outputDir) {
   return result;
 }
 
+/**
+ * Validate and reconcile subagent partial JSON files against the final report.
+ *
+ * @param {string} outputDir
+ * @param {Finding[]} finalFindings
+ * @param {{strict?: boolean}} [options]
+ */
 export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
   const absOutputDir = normalizeLocalPath(outputDir);
   const result = {
@@ -445,7 +549,7 @@ export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
 
   if (result.dedupedPartialFindingCount !== result.finalSubagentFindingCount) {
     result.errors.push(
-      `Final subagent finding count (${result.finalSubagentFindingCount}) does not match deduplicated partial count (${result.dedupedPartialFindingCount}).`
+      `Final subagent finding count (${result.finalSubagentFindingCount}) does not match deduplicated partial count (${result.dedupedPartialFindingCount}).`,
     );
   }
 
@@ -457,7 +561,9 @@ export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
   for (const [toolName, count] of toolCounts.entries()) {
     if (count > 1) {
       result.duplicateToolExecutions[toolName] = count;
-      result.errors.push(`${toolName} appears executed ${count} times in subagent partial metadata; whole-tree tools must run once in Phase 0/1.`);
+      result.errors.push(
+        `${toolName} appears executed ${count} times in subagent partial metadata; whole-tree tools must run once in Phase 0/1.`,
+      );
     }
   }
 
@@ -503,7 +609,7 @@ function normalizeSemgrepFinding(result, index) {
 }
 
 function firstAuditAdvisory(vulnerability) {
-  return (vulnerability.via || []).find(item => item && typeof item === 'object') || {};
+  return (vulnerability.via || []).find((item) => item && typeof item === 'object') || {};
 }
 
 function formatNpmFix(vulnerability) {
@@ -519,6 +625,12 @@ function formatNpmFix(vulnerability) {
   return `Review ${vulnerability.name} and update${version} if compatible.${major}`;
 }
 
+/**
+ * Normalize npm audit JSON into canonical dependency findings.
+ *
+ * @param {object} auditJson
+ * @returns {Finding[]}
+ */
 export function normalizeNpmAuditFindings(auditJson = {}) {
   const vulnerabilities = auditJson.vulnerabilities || {};
   return Object.values(vulnerabilities).map((vulnerability, index) => {
@@ -536,14 +648,16 @@ export function normalizeNpmAuditFindings(auditJson = {}) {
       description: advisory.title || `${vulnerability.name} has a known vulnerability in npm audit.`,
       file: 'package-lock.json',
       line: 1,
-      vulnerableCode: `${vulnerability.name} ${vulnerability.range || ''} (${directness}); affected nodes: ${nodes}`.trim(),
+      vulnerableCode:
+        `${vulnerability.name} ${vulnerability.range || ''} (${directness}); affected nodes: ${nodes}`.trim(),
       cwe,
       owasp: 'A06:2021 - Vulnerable and Outdated Components',
       vibeRisk: false,
       compliance: 'Known vulnerable dependency reported by npm audit',
       fix: formatNpmFix(vulnerability),
       confidence: 'TOOL-ONLY',
-      exploitation: 'A vulnerable dependency can be exploited when application code reaches the affected package or when package lifecycle behavior is abused.',
+      exploitation:
+        'A vulnerable dependency can be exploited when application code reaches the affected package or when package lifecycle behavior is abused.',
       references,
       source: 'npm-audit',
     };
@@ -572,6 +686,13 @@ function normalizeSourcePath(sourcePath, rootDir) {
   return rel && !rel.startsWith('..') ? rel.replace(/\\/g, '/') : sourcePath.replace(/\\/g, '/');
 }
 
+/**
+ * Normalize OSV-Scanner JSON into canonical dependency findings.
+ *
+ * @param {object} osvJson
+ * @param {string} rootDir
+ * @returns {Finding[]}
+ */
 export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd()) {
   const findings = [];
   for (const result of osvJson.results || []) {
@@ -580,31 +701,34 @@ export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd(
       const pkgInfo = pkg.package || {};
       for (const vulnerability of pkg.vulnerabilities || []) {
         const fixedVersions = getOsvFixedVersions(vulnerability);
-        const fix = fixedVersions.length > 0
-          ? `Review ${pkgInfo.name} and update to ${fixedVersions.join(' or ')} or later when compatible with the project.`
-          : `Review ${pkgInfo.name}; OSV did not report a fixed version, so evaluate compensating controls, replacement, or removal.`;
+        const fix =
+          fixedVersions.length > 0
+            ? `Review ${pkgInfo.name} and update to ${fixedVersions.join(' or ')} or later when compatible with the project.`
+            : `Review ${pkgInfo.name}; OSV did not report a fixed version, so evaluate compensating controls, replacement, or removal.`;
 
         findings.push({
           id: `OSV_${findings.length + 1}`,
           severity: getOsvSeverity(vulnerability),
           category: 'Dependency Vulnerability',
           name: `OSV: ${pkgInfo.name || 'package'} ${vulnerability.id || ''}`.trim(),
-          description: vulnerability.summary || vulnerability.details || 'OSV-Scanner reported a vulnerable dependency.',
+          description:
+            vulnerability.summary || vulnerability.details || 'OSV-Scanner reported a vulnerable dependency.',
           file: sourcePath,
           line: 1,
           vulnerableCode: `${pkgInfo.ecosystem || 'package'}:${pkgInfo.name || 'unknown'}@${pkgInfo.version || 'unknown'} from ${sourcePath}`,
           cwe: Array.isArray(vulnerability.aliases)
-            ? vulnerability.aliases.find(alias => /^CWE-\d+$/i.test(alias)) || 'N/A'
+            ? vulnerability.aliases.find((alias) => /^CWE-\d+$/i.test(alias)) || 'N/A'
             : 'N/A',
           owasp: 'A06:2021 - Vulnerable and Outdated Components',
           vibeRisk: false,
           compliance: 'Known vulnerable dependency reported by OSV-Scanner',
           fix,
           confidence: 'TOOL-ONLY',
-          exploitation: 'A vulnerable dependency can become exploitable when reachable from application code, build scripts, package lifecycle hooks, or deployment artifacts.',
+          exploitation:
+            'A vulnerable dependency can become exploitable when reachable from application code, build scripts, package lifecycle hooks, or deployment artifacts.',
           references: [
             vulnerability.id ? `https://osv.dev/${vulnerability.id}` : null,
-            ...(vulnerability.references || []).map(ref => ref.url),
+            ...(vulnerability.references || []).map((ref) => ref.url),
           ].filter(Boolean),
           source: 'osv-scanner',
         });
@@ -619,17 +743,7 @@ async function runSemgrep(rootDir) {
     const versionResult = await execTool('semgrep', ['--version'], { timeout: 30000 });
     const scanResult = await execTool(
       'semgrep',
-      [
-        '--config',
-        'auto',
-        '--json',
-        '--quiet',
-        '--exclude',
-        'node_modules',
-        '--exclude',
-        'csreview-reports',
-        rootDir,
-      ],
+      ['--config', 'auto', '--json', '--quiet', '--exclude', 'node_modules', '--exclude', 'csreview-reports', rootDir],
       {
         cwd: rootDir,
         timeout: 120000,
@@ -780,6 +894,13 @@ export async function checkExternalTools(rootDir = process.cwd()) {
   };
 }
 
+/**
+ * Run engine-orchestrated external tools once and return their normalized output.
+ *
+ * @param {string} rootDir
+ * @param {{runTools?: boolean}} options
+ * @returns {Promise<ToolResults>}
+ */
 async function runSecurityTools(rootDir, options) {
   if (options.runTools === false) {
     return createSkippedToolResult('Tool execution disabled by caller.');
@@ -798,18 +919,20 @@ async function runSecurityTools(rootDir, options) {
   };
 }
 
+/**
+ * Classify confidence mode from availability of engine-orchestrated tools.
+ *
+ * @param {Partial<ToolResults>} toolResults
+ */
 export function classifyToolMode(toolResults = {}) {
-  const relevantTools = [
-    toolResults.semgrep,
-    toolResults.osvScanner,
-  ];
+  const relevantTools = [toolResults.semgrep, toolResults.osvScanner];
 
   if (!toolResults.npmAudit?.skipped) {
     relevantTools.push(toolResults.npmAudit);
   }
 
   const concreteTools = relevantTools.filter(Boolean);
-  const availableCount = concreteTools.filter(tool => tool.available).length;
+  const availableCount = concreteTools.filter((tool) => tool.available).length;
   if (availableCount === 0) {
     return 'Agent-Only';
   }
@@ -819,6 +942,12 @@ export function classifyToolMode(toolResults = {}) {
   return 'Hybrid';
 }
 
+/**
+ * Run a full CSReview static analysis and write reports.
+ *
+ * @param {string} rootDir
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string}} [options]
+ */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
   const absRoot = normalizeLocalPath(rootDir);
@@ -862,7 +991,11 @@ export async function runAnalysis(rootDir, options = {}) {
   }
 
   generateHtmlReport(projectInfo, findings, htmlPath, { toolResults, partialReconciliation });
-  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults, partialReconciliation, analysisStartTime: startTime });
+  generateMarkdownReport(projectInfo, findings, mdPath, {
+    toolResults,
+    partialReconciliation,
+    analysisStartTime: startTime,
+  });
 
   const duration = Date.now() - startTime;
 

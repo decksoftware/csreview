@@ -1,3 +1,4 @@
+// @ts-check
 import path from 'path';
 
 function assertPathString(inputPath, name) {
@@ -26,11 +27,11 @@ export function safeResolveInside(rootDir, relativePath) {
   assertPathString(rootDir, 'rootDir');
 
   if (
-    typeof relativePath !== 'string'
-    || relativePath.trim() === ''
-    || path.isAbsolute(relativePath)
-    || path.win32.isAbsolute(relativePath)
-    || /^[A-Za-z]:/.test(relativePath)
+    typeof relativePath !== 'string' ||
+    relativePath.trim() === '' ||
+    path.isAbsolute(relativePath) ||
+    path.win32.isAbsolute(relativePath) ||
+    /^[A-Za-z]:/.test(relativePath)
   ) {
     return null;
   }

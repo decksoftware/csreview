@@ -1,32 +1,69 @@
+// @ts-check
 import fs from 'fs';
 import path from 'path';
 import { glob } from 'glob';
 import { safeResolveInside } from './pathSafety.js';
 
 const SOURCE_EXTENSIONS = [
-  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
-  'py', 'pyw',
+  'js',
+  'mjs',
+  'cjs',
+  'ts',
+  'tsx',
+  'jsx',
+  'py',
+  'pyw',
   'java',
-  'kt', 'kts',
+  'kt',
+  'kts',
   'go',
   'rs',
-  'php', 'phtml',
-  'rb', 'erb',
-  'cs', 'cshtml', 'razor',
-  'c', 'cpp', 'cc', 'cxx', 'h', 'hpp',
+  'php',
+  'phtml',
+  'rb',
+  'erb',
+  'cs',
+  'cshtml',
+  'razor',
+  'c',
+  'cpp',
+  'cc',
+  'cxx',
+  'h',
+  'hpp',
   'swift',
   'dart',
-  'pas', 'pp', 'dpr', 'lpr', 'lfm', 'dfm',
+  'pas',
+  'pp',
+  'dpr',
+  'lpr',
+  'lfm',
+  'dfm',
   'lua',
-  'scala', 'sc',
-  'ex', 'exs',
-  'clj', 'cljs',
+  'scala',
+  'sc',
+  'ex',
+  'exs',
+  'clj',
+  'cljs',
   'vue',
   'svelte',
-  'html', 'htm', 'ejs', 'hbs', 'twig', 'pug', 'jade',
-  'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+  'html',
+  'htm',
+  'ejs',
+  'hbs',
+  'twig',
+  'pug',
+  'jade',
+  'sh',
+  'bash',
+  'zsh',
+  'ps1',
+  'bat',
+  'cmd',
   'sql',
-  'graphql', 'gql'
+  'graphql',
+  'gql',
 ];
 
 const IGNORE_PATTERNS = [
@@ -57,69 +94,69 @@ const IGNORE_PATTERNS = [
   '**/csreview-report.md',
   '**/*_security-report.html',
   '**/*_security-findings.md',
-  '**/csreview-reports/**'
+  '**/csreview-reports/**',
 ];
 
 const EXTENSION_TO_TECH = {
-  'js': 'JavaScript/TypeScript',
-  'mjs': 'JavaScript/TypeScript',
-  'cjs': 'JavaScript/TypeScript',
-  'ts': 'JavaScript/TypeScript',
-  'tsx': 'JavaScript/TypeScript',
-  'jsx': 'JavaScript/TypeScript',
-  'py': 'Python',
-  'pyw': 'Python',
-  'java': 'Java',
-  'kt': 'Kotlin',
-  'kts': 'Kotlin',
-  'go': 'Go',
-  'rs': 'Rust',
-  'php': 'PHP',
-  'phtml': 'PHP',
-  'rb': 'Ruby',
-  'erb': 'Ruby',
-  'cs': 'C#',
-  'cshtml': 'C#',
-  'razor': 'C#',
-  'c': 'C/C++',
-  'cpp': 'C/C++',
-  'cc': 'C/C++',
-  'cxx': 'C/C++',
-  'h': 'C/C++',
-  'hpp': 'C/C++',
-  'swift': 'Swift',
-  'dart': 'Dart',
-  'pas': 'Delphi',
-  'pp': 'Delphi',
-  'dpr': 'Delphi',
-  'lpr': 'Delphi',
-  'lfm': 'Delphi',
-  'dfm': 'Delphi',
-  'lua': 'Lua',
-  'scala': 'Scala',
-  'sc': 'Scala',
-  'ex': 'Elixir',
-  'exs': 'Elixir',
-  'clj': 'Clojure',
-  'cljs': 'Clojure',
-  'vue': 'Vue',
-  'svelte': 'Svelte',
-  'html': 'HTML',
-  'htm': 'HTML',
-  'ejs': 'HTML Templates',
-  'hbs': 'HTML Templates',
-  'twig': 'HTML Templates',
-  'pug': 'HTML Templates',
-  'jade': 'HTML Templates',
-  'sh': 'Shell',
-  'bash': 'Shell',
-  'zsh': 'Shell',
-  'ps1': 'Shell',
-  'bat': 'Shell',
-  'cmd': 'Shell',
-  'sql': 'SQL',
-  'graphql': 'GraphQL',
-  'gql': 'GraphQL'
+  js: 'JavaScript/TypeScript',
+  mjs: 'JavaScript/TypeScript',
+  cjs: 'JavaScript/TypeScript',
+  ts: 'JavaScript/TypeScript',
+  tsx: 'JavaScript/TypeScript',
+  jsx: 'JavaScript/TypeScript',
+  py: 'Python',
+  pyw: 'Python',
+  java: 'Java',
+  kt: 'Kotlin',
+  kts: 'Kotlin',
+  go: 'Go',
+  rs: 'Rust',
+  php: 'PHP',
+  phtml: 'PHP',
+  rb: 'Ruby',
+  erb: 'Ruby',
+  cs: 'C#',
+  cshtml: 'C#',
+  razor: 'C#',
+  c: 'C/C++',
+  cpp: 'C/C++',
+  cc: 'C/C++',
+  cxx: 'C/C++',
+  h: 'C/C++',
+  hpp: 'C/C++',
+  swift: 'Swift',
+  dart: 'Dart',
+  pas: 'Delphi',
+  pp: 'Delphi',
+  dpr: 'Delphi',
+  lpr: 'Delphi',
+  lfm: 'Delphi',
+  dfm: 'Delphi',
+  lua: 'Lua',
+  scala: 'Scala',
+  sc: 'Scala',
+  ex: 'Elixir',
+  exs: 'Elixir',
+  clj: 'Clojure',
+  cljs: 'Clojure',
+  vue: 'Vue',
+  svelte: 'Svelte',
+  html: 'HTML',
+  htm: 'HTML',
+  ejs: 'HTML Templates',
+  hbs: 'HTML Templates',
+  twig: 'HTML Templates',
+  pug: 'HTML Templates',
+  jade: 'HTML Templates',
+  sh: 'Shell',
+  bash: 'Shell',
+  zsh: 'Shell',
+  ps1: 'Shell',
+  bat: 'Shell',
+  cmd: 'Shell',
+  sql: 'SQL',
+  graphql: 'GraphQL',
+  gql: 'GraphQL',
 };
 
 function buildSourceGlobPattern() {
@@ -182,7 +219,7 @@ function detectTechStack(files) {
 
 function detectFrameworksFromPackageJson(rootDir, depFiles) {
   const frameworks = [];
-  const pkgPath = depFiles.find(f => path.basename(f) === 'package.json');
+  const pkgPath = depFiles.find((f) => path.basename(f) === 'package.json');
 
   if (!pkgPath) return frameworks;
 
@@ -192,7 +229,7 @@ function detectFrameworksFromPackageJson(rootDir, depFiles) {
   const allDeps = {
     ...pkg.dependencies,
     ...pkg.devDependencies,
-    ...pkg.peerDependencies
+    ...pkg.peerDependencies,
   };
 
   if (allDeps['react']) frameworks.push('React');
@@ -214,7 +251,7 @@ function detectFrameworksFromPackageJson(rootDir, depFiles) {
 
 function detectFrameworksFromRequirements(rootDir, depFiles) {
   const frameworks = [];
-  const reqPath = depFiles.find(f => path.basename(f) === 'requirements.txt');
+  const reqPath = depFiles.find((f) => path.basename(f) === 'requirements.txt');
 
   if (!reqPath) return frameworks;
 
@@ -230,7 +267,7 @@ function detectFrameworksFromRequirements(rootDir, depFiles) {
 
 function detectFrameworksFromPyproject(rootDir, depFiles) {
   const frameworks = [];
-  const pyprojectPath = depFiles.find(f => path.basename(f) === 'pyproject.toml');
+  const pyprojectPath = depFiles.find((f) => path.basename(f) === 'pyproject.toml');
 
   if (!pyprojectPath) return frameworks;
 
@@ -245,7 +282,7 @@ function detectFrameworksFromPyproject(rootDir, depFiles) {
 
 function detectFrameworksFromComposer(rootDir, depFiles) {
   const frameworks = [];
-  const composerPath = depFiles.find(f => path.basename(f) === 'composer.json');
+  const composerPath = depFiles.find((f) => path.basename(f) === 'composer.json');
 
   if (!composerPath) return frameworks;
 
@@ -254,7 +291,7 @@ function detectFrameworksFromComposer(rootDir, depFiles) {
 
   const allDeps = {
     ...composer.require,
-    ...composer['require-dev']
+    ...composer['require-dev'],
   };
 
   if (allDeps && allDeps['laravel/framework']) frameworks.push('Laravel');
@@ -264,7 +301,7 @@ function detectFrameworksFromComposer(rootDir, depFiles) {
 
 function detectFrameworksFromGemfile(rootDir, depFiles) {
   const frameworks = [];
-  const gemfilePath = depFiles.find(f => path.basename(f) === 'Gemfile');
+  const gemfilePath = depFiles.find((f) => path.basename(f) === 'Gemfile');
 
   if (!gemfilePath) return frameworks;
 
@@ -278,7 +315,7 @@ function detectFrameworksFromGemfile(rootDir, depFiles) {
 
 function detectFrameworksFromPomXml(rootDir, depFiles) {
   const frameworks = [];
-  const pomPath = depFiles.find(f => path.basename(f) === 'pom.xml');
+  const pomPath = depFiles.find((f) => path.basename(f) === 'pom.xml');
 
   if (!pomPath) return frameworks;
 
@@ -291,7 +328,7 @@ function detectFrameworksFromPomXml(rootDir, depFiles) {
 
 function detectFrameworksFromGradle(rootDir, depFiles) {
   const frameworks = [];
-  const gradlePath = depFiles.find(f => {
+  const gradlePath = depFiles.find((f) => {
     const base = path.basename(f);
     return base === 'build.gradle' || base === 'build.gradle.kts';
   });
@@ -307,7 +344,7 @@ function detectFrameworksFromGradle(rootDir, depFiles) {
 
 function detectFrameworksFromGoMod(rootDir, depFiles) {
   const frameworks = [];
-  const goModPath = depFiles.find(f => path.basename(f) === 'go.mod');
+  const goModPath = depFiles.find((f) => path.basename(f) === 'go.mod');
 
   if (!goModPath) return frameworks;
 
@@ -322,7 +359,7 @@ function detectFrameworksFromGoMod(rootDir, depFiles) {
 
 function detectFrameworksFromCsproj(rootDir, depFiles) {
   const frameworks = [];
-  const csprojPath = depFiles.find(f => path.extname(f) === '.csproj');
+  const csprojPath = depFiles.find((f) => path.extname(f) === '.csproj');
 
   if (!csprojPath) return frameworks;
 
@@ -335,7 +372,7 @@ function detectFrameworksFromCsproj(rootDir, depFiles) {
 
 function detectFrameworksFromPubspec(rootDir, depFiles) {
   const frameworks = [];
-  const pubspecPath = depFiles.find(f => path.basename(f) === 'pubspec.yaml');
+  const pubspecPath = depFiles.find((f) => path.basename(f) === 'pubspec.yaml');
 
   if (!pubspecPath) return frameworks;
 
@@ -349,25 +386,25 @@ function detectFrameworksFromPubspec(rootDir, depFiles) {
 function detectFrameworksFromConfigFiles(rootDir, configFiles, files) {
   const frameworks = [];
 
-  const hasAngularJson = configFiles.some(f => path.basename(f) === 'angular.json');
+  const hasAngularJson = configFiles.some((f) => path.basename(f) === 'angular.json');
   if (hasAngularJson) frameworks.push('Angular');
 
-  const hasVueConfig = configFiles.some(f => path.basename(f).startsWith('vue.config.'));
+  const hasVueConfig = configFiles.some((f) => path.basename(f).startsWith('vue.config.'));
   if (hasVueConfig) frameworks.push('Vue');
 
-  const hasSvelteConfig = configFiles.some(f => path.basename(f).startsWith('svelte.config.'));
+  const hasSvelteConfig = configFiles.some((f) => path.basename(f).startsWith('svelte.config.'));
   if (hasSvelteConfig) frameworks.push('Svelte');
 
-  const hasNextConfig = configFiles.some(f => path.basename(f).startsWith('next.config.'));
+  const hasNextConfig = configFiles.some((f) => path.basename(f).startsWith('next.config.'));
   if (hasNextConfig) frameworks.push('Next.js');
 
-  const hasNuxtConfig = configFiles.some(f => path.basename(f).startsWith('nuxt.config.'));
+  const hasNuxtConfig = configFiles.some((f) => path.basename(f).startsWith('nuxt.config.'));
   if (hasNuxtConfig) frameworks.push('Nuxt');
 
-  const hasGatsbyConfig = configFiles.some(f => path.basename(f).startsWith('gatsby-config.'));
+  const hasGatsbyConfig = configFiles.some((f) => path.basename(f).startsWith('gatsby-config.'));
   if (hasGatsbyConfig) frameworks.push('Gatsby');
 
-  const hasManagePy = files.some(f => path.basename(f) === 'manage.py');
+  const hasManagePy = files.some((f) => path.basename(f) === 'manage.py');
   if (hasManagePy) frameworks.push('Django');
 
   return frameworks;
@@ -387,7 +424,7 @@ function detectFrameworks(rootDir, depFiles, configFiles, files) {
     detectFrameworksFromGoMod(rootDir, depFiles),
     detectFrameworksFromCsproj(rootDir, depFiles),
     detectFrameworksFromPubspec(rootDir, depFiles),
-    detectFrameworksFromConfigFiles(rootDir, configFiles, files)
+    detectFrameworksFromConfigFiles(rootDir, configFiles, files),
   ];
 
   for (const result of detectors) {
@@ -401,28 +438,37 @@ function detectFrameworks(rootDir, depFiles, configFiles, files) {
 
 function detectProjectType(frameworks, depFiles, rootDir) {
   const backendFrameworks = [
-    'Express', 'Fastify', 'NestJS', 'Django', 'Flask', 'FastAPI',
-    'Laravel', 'Rails', 'Spring', 'Gin', 'Echo', 'Fiber', 'ASP.NET'
+    'Express',
+    'Fastify',
+    'NestJS',
+    'Django',
+    'Flask',
+    'FastAPI',
+    'Laravel',
+    'Rails',
+    'Spring',
+    'Gin',
+    'Echo',
+    'Fiber',
+    'ASP.NET',
   ];
 
-  const frontendFrameworks = [
-    'React', 'Vue', 'Angular', 'Svelte', 'Next.js', 'Nuxt', 'Gatsby'
-  ];
+  const frontendFrameworks = ['React', 'Vue', 'Angular', 'Svelte', 'Next.js', 'Nuxt', 'Gatsby'];
 
   const mobileFrameworks = ['React Native', 'Flutter', 'Expo'];
   const desktopFrameworks = ['Electron', 'Tauri'];
 
-  const hasBackend = frameworks.some(fw => backendFrameworks.includes(fw));
-  const hasFrontend = frameworks.some(fw => frontendFrameworks.includes(fw));
-  const hasMobile = frameworks.some(fw => mobileFrameworks.includes(fw));
-  const hasDesktop = frameworks.some(fw => desktopFrameworks.includes(fw));
+  const hasBackend = frameworks.some((fw) => backendFrameworks.includes(fw));
+  const hasFrontend = frameworks.some((fw) => frontendFrameworks.includes(fw));
+  const hasMobile = frameworks.some((fw) => mobileFrameworks.includes(fw));
+  const hasDesktop = frameworks.some((fw) => desktopFrameworks.includes(fw));
 
   if (hasMobile) return 'mobile';
   if (hasDesktop) return 'desktop';
   if (hasBackend && !hasFrontend) return 'api';
   if (hasFrontend) return 'web';
 
-  const pkgPath = depFiles.find(f => path.basename(f) === 'package.json');
+  const pkgPath = depFiles.find((f) => path.basename(f) === 'package.json');
   if (pkgPath) {
     const pkg = readProjectJson(rootDir, pkgPath);
     if (pkg) {
@@ -457,7 +503,7 @@ function getBaasFilePatterns() {
     'pb_migrations/*.js',
     'convex/*.ts',
     'drizzle.config.*',
-    'prisma/schema.prisma'
+    'prisma/schema.prisma',
   ];
 }
 
@@ -482,10 +528,8 @@ export function readFileSafe(filePath) {
     const content = fs.readFileSync(filePath, 'utf8');
 
     const lines = content.split('\n');
-    const isMinified = lines.length > 0 && (
-      (content.length / lines.length > 500) ||
-      lines.some(line => line.length > 10000)
-    );
+    const isMinified =
+      lines.length > 0 && (content.length / lines.length > 500 || lines.some((line) => line.length > 10000));
 
     return { content, isBinary: false, isMinified };
   } catch {
@@ -502,22 +546,49 @@ export async function scanProject(rootDir) {
     cwd: rootDir,
     nodir: true,
     dot: true,
-    ignore: IGNORE_PATTERNS
+    ignore: IGNORE_PATTERNS,
   });
 
   const configPatterns = [
-    '.env', '.env.local', '.env.development', '.env.production', '.env.staging', '.env.test',
-    'docker-compose.yml', 'docker-compose.yaml', 'Dockerfile', '.dockerignore',
-    'nginx.conf', 'apache2.conf', '.htaccess',
-    '.github/workflows/*.yml', '.github/workflows/*.yaml',
-    '.gitlab-ci.yml', 'Jenkinsfile', '.circleci/config.yml', 'bitbucket-pipelines.yml',
-    '*.tf', '*.tfvars',
-    '.eslintrc', '.eslintrc.*', 'security.txt',
-    'package.json', 'tsconfig.json',
-    'webpack.config.*', 'vite.config.*', 'next.config.*', 'nuxt.config.*',
-    'angular.json', 'vue.config.*', 'svelte.config.*', 'gatsby-config.*',
-    '*.pem', '*.crt', '*.key',
-    'terraform/*.tf', 'terraform/*.tfvars'
+    '.env',
+    '.env.local',
+    '.env.development',
+    '.env.production',
+    '.env.staging',
+    '.env.test',
+    'docker-compose.yml',
+    'docker-compose.yaml',
+    'Dockerfile',
+    '.dockerignore',
+    'nginx.conf',
+    'apache2.conf',
+    '.htaccess',
+    '.github/workflows/*.yml',
+    '.github/workflows/*.yaml',
+    '.gitlab-ci.yml',
+    'Jenkinsfile',
+    '.circleci/config.yml',
+    'bitbucket-pipelines.yml',
+    '*.tf',
+    '*.tfvars',
+    '.eslintrc',
+    '.eslintrc.*',
+    'security.txt',
+    'package.json',
+    'tsconfig.json',
+    'webpack.config.*',
+    'vite.config.*',
+    'next.config.*',
+    'nuxt.config.*',
+    'angular.json',
+    'vue.config.*',
+    'svelte.config.*',
+    'gatsby-config.*',
+    '*.pem',
+    '*.crt',
+    '*.key',
+    'terraform/*.tf',
+    'terraform/*.tfvars',
   ];
 
   const configFiles = [];
@@ -527,7 +598,7 @@ export async function scanProject(rootDir) {
         cwd: rootDir,
         nodir: true,
         dot: true,
-        ignore: IGNORE_PATTERNS
+        ignore: IGNORE_PATTERNS,
       });
       for (const match of matches) {
         if (!configFiles.includes(match)) {
@@ -540,18 +611,38 @@ export async function scanProject(rootDir) {
   }
 
   const depPatterns = [
-    'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
-    'requirements.txt', 'pyproject.toml', 'setup.py', 'setup.cfg',
-    'Pipfile', 'Pipfile.lock', 'poetry.lock',
-    'go.mod', 'go.sum',
-    'Cargo.toml', 'Cargo.lock',
-    'pom.xml', 'build.gradle', 'build.gradle.kts',
-    'Gemfile', 'Gemfile.lock', '*.gemspec',
-    'composer.json', 'composer.lock',
-    '*.csproj', '*.sln', 'packages.config', 'nuget.config',
-    'pubspec.yaml', 'pubspec.lock',
+    'package.json',
+    'package-lock.json',
+    'yarn.lock',
+    'pnpm-lock.yaml',
+    'requirements.txt',
+    'pyproject.toml',
+    'setup.py',
+    'setup.cfg',
+    'Pipfile',
+    'Pipfile.lock',
+    'poetry.lock',
+    'go.mod',
+    'go.sum',
+    'Cargo.toml',
+    'Cargo.lock',
+    'pom.xml',
+    'build.gradle',
+    'build.gradle.kts',
+    'Gemfile',
+    'Gemfile.lock',
+    '*.gemspec',
+    'composer.json',
+    'composer.lock',
+    '*.csproj',
+    '*.sln',
+    'packages.config',
+    'nuget.config',
+    'pubspec.yaml',
+    'pubspec.lock',
     'Package.swift',
-    '*.lpi', '*.dproj'
+    '*.lpi',
+    '*.dproj',
   ];
 
   const depFiles = [];
@@ -561,7 +652,7 @@ export async function scanProject(rootDir) {
         cwd: rootDir,
         nodir: true,
         dot: true,
-        ignore: IGNORE_PATTERNS
+        ignore: IGNORE_PATTERNS,
       });
       for (const match of matches) {
         if (!depFiles.includes(match)) {
@@ -581,7 +672,7 @@ export async function scanProject(rootDir) {
         cwd: rootDir,
         nodir: true,
         dot: true,
-        ignore: IGNORE_PATTERNS
+        ignore: IGNORE_PATTERNS,
       });
       for (const match of matches) {
         if (!baasFiles.includes(match)) {
@@ -595,16 +686,16 @@ export async function scanProject(rootDir) {
 
   const techStack = detectTechStack(sourceFiles);
 
-  const hasNodeJs = depFiles.some(f => path.basename(f) === 'package.json');
-  const hasPython = depFiles.some(f =>
-    ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile'].includes(path.basename(f))
+  const hasNodeJs = depFiles.some((f) => path.basename(f) === 'package.json');
+  const hasPython = depFiles.some((f) =>
+    ['requirements.txt', 'pyproject.toml', 'setup.py', 'Pipfile'].includes(path.basename(f)),
   );
-  const hasGo = depFiles.some(f => path.basename(f) === 'go.mod');
-  const hasRust = depFiles.some(f => path.basename(f) === 'Cargo.toml');
-  const hasDotNet = depFiles.some(f => path.extname(f) === '.csproj' || path.extname(f) === '.sln');
-  const hasDart = depFiles.some(f => path.basename(f) === 'pubspec.yaml');
-  const hasSwift = depFiles.some(f => path.basename(f) === 'Package.swift');
-  const hasDelphi = depFiles.some(f => {
+  const hasGo = depFiles.some((f) => path.basename(f) === 'go.mod');
+  const hasRust = depFiles.some((f) => path.basename(f) === 'Cargo.toml');
+  const hasDotNet = depFiles.some((f) => path.extname(f) === '.csproj' || path.extname(f) === '.sln');
+  const hasDart = depFiles.some((f) => path.basename(f) === 'pubspec.yaml');
+  const hasSwift = depFiles.some((f) => path.basename(f) === 'Package.swift');
+  const hasDelphi = depFiles.some((f) => {
     const ext = path.extname(f);
     return ext === '.lpi' || ext === '.dproj';
   });
@@ -638,7 +729,7 @@ export async function scanProject(rootDir) {
     baasFiles,
     techStack,
     frameworks,
-    projectType
+    projectType,
   };
 
   return projectInfo;

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noEmit": true,
+    "strict": false,
+    "maxNodeModuleJsDepth": 0,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js", "test/**/*.js", "eslint.config.js"],
+  "exclude": ["node_modules", "csreview-reports"]
+}

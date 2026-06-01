@@ -1,3 +1,4 @@
+// @ts-check
 import fs from 'fs';
 import { calculateSecurityScore } from '../score.js';
 
@@ -6,7 +7,7 @@ const SEVERITY_COLORS = {
   HIGH: '#ea580c',
   MEDIUM: '#ca8a04',
   LOW: '#2563eb',
-  INFO: '#64748b'
+  INFO: '#64748b',
 };
 
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
@@ -69,22 +70,22 @@ function getSeverityColor(severity) {
 
 function getCategoryIcon(category) {
   const icons = {
-    'Injection': '💉',
-    'XSS': '🕸️',
-    'Authentication': '🔐',
-    'Authorization': '🛡️',
-    'Cryptography': '🔒',
-    'Configuration': '⚙️',
-    'Dependencies': '📦',
-    'Secrets': '🗝️',
-    'Logging': '📋',
-    'Session': '🎫',
+    Injection: '💉',
+    XSS: '🕸️',
+    Authentication: '🔐',
+    Authorization: '🛡️',
+    Cryptography: '🔒',
+    Configuration: '⚙️',
+    Dependencies: '📦',
+    Secrets: '🗝️',
+    Logging: '📋',
+    Session: '🎫',
     'Input Validation': '✅',
-    'CORS': '🌐',
+    CORS: '🌐',
     'File Upload': '📁',
-    'Serialization': '🧩',
-    'SSRF': '🔄',
-    'Deserialization': '📥',
+    Serialization: '🧩',
+    SSRF: '🔄',
+    Deserialization: '📥',
     'Path Traversal': '📂',
     'Command Injection': '⌨️',
     'SQL Injection': '🗃️',
@@ -96,7 +97,7 @@ function getCategoryIcon(category) {
     'Data Exposure': '📊',
     'Code Quality': '📝',
     'Error Handling': '⚠️',
-    'Privilege Escalation': '⬆️'
+    'Privilege Escalation': '⬆️',
   };
   return icons[category] || '🔍';
 }
@@ -116,18 +117,107 @@ function getScoreLabel(score) {
 }
 
 function highlightCode(code) {
-  const keywords = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
-    'class', 'import', 'export', 'from', 'async', 'await', 'try', 'catch', 'throw', 'new',
-    'this', 'typeof', 'instanceof', 'switch', 'case', 'break', 'default', 'true', 'false',
-    'null', 'undefined', 'require', 'module', 'exports', 'console', 'process', 'yield',
-    'extends', 'super', 'static', 'get', 'set', 'of', 'in', 'do', 'delete', 'void',
-    'public', 'private', 'protected', 'interface', 'type', 'enum', 'implements', 'abstract',
-    'readonly', 'declare', 'namespace', 'package', 'with', 'debugger', 'finally'];
-  const builtins = ['console', 'JSON', 'Math', 'Object', 'Array', 'String', 'Number', 'Boolean',
-    'Date', 'RegExp', 'Error', 'Map', 'Set', 'Promise', 'Symbol', 'Proxy', 'Reflect',
-    'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURI', 'decodeURI',
-    'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'fetch', 'URL',
-    'Buffer', 'require', 'process', '__dirname', '__filename', 'module', 'exports'];
+  const keywords = [
+    'const',
+    'let',
+    'var',
+    'function',
+    'return',
+    'if',
+    'else',
+    'for',
+    'while',
+    'class',
+    'import',
+    'export',
+    'from',
+    'async',
+    'await',
+    'try',
+    'catch',
+    'throw',
+    'new',
+    'this',
+    'typeof',
+    'instanceof',
+    'switch',
+    'case',
+    'break',
+    'default',
+    'true',
+    'false',
+    'null',
+    'undefined',
+    'require',
+    'module',
+    'exports',
+    'console',
+    'process',
+    'yield',
+    'extends',
+    'super',
+    'static',
+    'get',
+    'set',
+    'of',
+    'in',
+    'do',
+    'delete',
+    'void',
+    'public',
+    'private',
+    'protected',
+    'interface',
+    'type',
+    'enum',
+    'implements',
+    'abstract',
+    'readonly',
+    'declare',
+    'namespace',
+    'package',
+    'with',
+    'debugger',
+    'finally',
+  ];
+  const builtins = [
+    'console',
+    'JSON',
+    'Math',
+    'Object',
+    'Array',
+    'String',
+    'Number',
+    'Boolean',
+    'Date',
+    'RegExp',
+    'Error',
+    'Map',
+    'Set',
+    'Promise',
+    'Symbol',
+    'Proxy',
+    'Reflect',
+    'parseInt',
+    'parseFloat',
+    'isNaN',
+    'isFinite',
+    'encodeURI',
+    'decodeURI',
+    'setTimeout',
+    'setInterval',
+    'clearTimeout',
+    'clearInterval',
+    'fetch',
+    'URL',
+    'Buffer',
+    'require',
+    'process',
+    '__dirname',
+    '__filename',
+    'module',
+    'exports',
+  ];
   const safePattern = /&amp;|&lt;|&gt;|&quot;|&#039;/g;
   const safeEntities = [];
   let processed = code.replace(safePattern, (match) => {
@@ -183,7 +273,9 @@ function buildFileData(findings) {
     const name = f.file.split(/[/\\]/).pop();
     files[name] = (files[name] || 0) + 1;
   }
-  return Object.entries(files).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  return Object.entries(files)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
 }
 
 export function generateHtmlReport(projectInfo, findings, outputPath, metadata = {}) {
@@ -192,25 +284,26 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const scoreLabel = getScoreLabel(score);
   const counts = {};
   for (const sev of SEVERITY_ORDER) {
-    counts[sev] = findings.filter(f => f.severity === sev).length;
+    counts[sev] = findings.filter((f) => f.severity === sev).length;
   }
-  const categories = [...new Set(findings.map(f => f.category))].sort();
+  const categories = [...new Set(findings.map((f) => f.category))].sort();
   const categoryData = buildCategoryData(findings);
   const fileData = buildFileData(findings);
   const maxCatCount = categoryData.length > 0 ? categoryData[0][1] : 1;
   const maxFileCount = fileData.length > 0 ? fileData[0][1] : 1;
   const conicGradient = buildConicGradient(counts);
   const totalFindings = findings.length;
-  const uniqueFiles = new Set(findings.map(f => f.file)).size;
-  const vibeRiskCount = findings.filter(f => f.vibeRisk).length;
+  const uniqueFiles = new Set(findings.map((f) => f.file)).size;
+  const vibeRiskCount = findings.filter((f) => f.vibeRisk).length;
   const now = new Date().toISOString().split('T')[0];
   const toolMode = metadata.toolResults?.mode || 'Agent-Only';
   const semgrep = metadata.toolResults?.semgrep || {};
   const npmAudit = metadata.toolResults?.npmAudit || {};
   const osvScanner = metadata.toolResults?.osvScanner || {};
-  const assuranceNote = totalFindings === 0
-    ? '<p><strong>Assurance note:</strong> No findings were identified by this run. This does not prove the application is secure; it means CSReview and the available external tools did not detect reportable issues in the analyzed scope.</p>'
-    : '';
+  const assuranceNote =
+    totalFindings === 0
+      ? '<p><strong>Assurance note:</strong> No findings were identified by this run. This does not prove the application is secure; it means CSReview and the available external tools did not detect reportable issues in the analyzed scope.</p>'
+      : '';
   const semgrepText = semgrep.available
     ? `Semgrep ${escapeHtml(semgrep.version || '')} (${semgrep.rawCount || semgrep.findings?.length || 0} findings)`
     : `Semgrep unavailable${semgrep.error ? `: ${escapeHtml(semgrep.error)}` : ''}. Install with pipx install semgrep, uv tool install semgrep, or brew install semgrep.`;
@@ -221,26 +314,29 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
     ? `OSV-Scanner ${escapeHtml(osvScanner.version || '')} (${osvScanner.rawCount || osvScanner.findings?.length || 0} findings)`
     : `OSV-Scanner unavailable${osvScanner.error ? `: ${escapeHtml(osvScanner.error)}` : ''}. Install with winget install Google.OSVScanner, brew install osv-scanner, or go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest.`;
 
-  const findingsHtml = findings.map(f => {
-    const color = getSeverityColor(f.severity);
-    const icon = getCategoryIcon(f.category);
-    const safeId = safeToken(f.id, 'finding');
-    const safeSeverity = safeToken(f.severity, 'info').toUpperCase();
-    const safeConfidence = safeToken(f.confidence || 'medium', 'medium');
-    const filePath = String(f.file || 'unknown');
-    const vibeBadge = f.vibeRisk
-      ? `<span class="vibe-badge" title="Vibe Coding Risk">⚡ Vibe Coding Risk</span>`
-      : '';
-    const refs = (f.references || []).map(r => {
-      if (typeof r === 'string') {
-        return `<a href="${escapeHtml(r)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r)}</a>`;
-      }
-      return '';
-    }).join('\n');
-    const highlightedVuln = highlightCode(escapeHtml(f.vulnerableCode || ''));
-    const highlightedFix = highlightCode(escapeHtml(f.fix || ''));
+  const findingsHtml = findings
+    .map((f) => {
+      const color = getSeverityColor(f.severity);
+      const icon = getCategoryIcon(f.category);
+      const safeId = safeToken(f.id, 'finding');
+      const safeSeverity = safeToken(f.severity, 'info').toUpperCase();
+      const safeConfidence = safeToken(f.confidence || 'medium', 'medium');
+      const filePath = String(f.file || 'unknown');
+      const vibeBadge = f.vibeRisk
+        ? `<span class="vibe-badge" title="Vibe Coding Risk">⚡ Vibe Coding Risk</span>`
+        : '';
+      const refs = (f.references || [])
+        .map((r) => {
+          if (typeof r === 'string') {
+            return `<a href="${escapeHtml(r)}" target="_blank" rel="noopener noreferrer">${escapeHtml(r)}</a>`;
+          }
+          return '';
+        })
+        .join('\n');
+      const highlightedVuln = highlightCode(escapeHtml(f.vulnerableCode || ''));
+      const highlightedFix = highlightCode(escapeHtml(f.fix || ''));
 
-    return `
+      return `
     <article class="finding-card" data-severity="${escapeHtml(safeSeverity)}" data-category="${escapeHtml(f.category)}" data-file="${escapeHtml(filePath)}" id="finding-${escapeHtml(safeId)}">
       <div class="finding-header" onclick="toggleFinding(this)">
         <div class="finding-header-left">
@@ -283,15 +379,19 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
         </div>
       </div>
     </article>`;
-  }).join('\n');
+    })
+    .join('\n');
 
-  const severityCardsHtml = SEVERITY_ORDER.map(sev => `
+  const severityCardsHtml = SEVERITY_ORDER.map(
+    (sev) => `
     <div class="stat-card" style="border-left: 4px solid ${getSeverityColor(sev)}" onclick="filterBySeverity('${sev}')">
       <div class="stat-count" style="color: ${getSeverityColor(sev)}">${counts[sev]}</div>
       <div class="stat-label">${sev}</div>
-    </div>`).join('');
+    </div>`,
+  ).join('');
 
-  const severityFiltersHtml = SEVERITY_ORDER.map(sev => `
+  const severityFiltersHtml = SEVERITY_ORDER.map(
+    (sev) => `
     <label class="filter-checkbox">
       <input type="checkbox" value="${sev}" checked onchange="applyFilters()">
       <span class="checkbox-label">
@@ -299,34 +399,49 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
         ${sev}
         <span class="filter-count">${counts[sev]}</span>
       </span>
-    </label>`).join('');
+    </label>`,
+  ).join('');
 
-  const categoryFiltersHtml = categories.map(cat => `
+  const categoryFiltersHtml = categories
+    .map(
+      (cat) => `
     <label class="filter-checkbox">
       <input type="checkbox" value="${escapeHtml(cat)}" checked onchange="applyFilters()">
       <span class="checkbox-label">${getCategoryIcon(cat)} ${escapeHtml(cat)}</span>
-    </label>`).join('');
+    </label>`,
+    )
+    .join('');
 
-  const catBarHtml = categoryData.map(([cat, count]) => `
+  const catBarHtml = categoryData
+    .map(
+      ([cat, count]) => `
     <div class="bar-row">
       <span class="bar-label">${getCategoryIcon(cat)} ${escapeHtml(cat)}</span>
       <div class="bar-track">
         <div class="bar-fill" style="width:${(count / maxCatCount) * 100}%; background:#3b82f6"></div>
       </div>
       <span class="bar-value">${count}</span>
-    </div>`).join('');
+    </div>`,
+    )
+    .join('');
 
-  const fileBarHtml = fileData.map(([file, count]) => `
+  const fileBarHtml = fileData
+    .map(
+      ([file, count]) => `
     <div class="bar-row">
       <span class="bar-label" title="${escapeHtml(file)}">${escapeHtml(file)}</span>
       <div class="bar-track">
         <div class="bar-fill" style="width:${(count / maxFileCount) * 100}%; background:#8b5cf6"></div>
       </div>
       <span class="bar-value">${count}</span>
-    </div>`).join('');
+    </div>`,
+    )
+    .join('');
 
-  const techStackHtml = (projectInfo.techStack || []).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('');
-  const frameworksHtml = (projectInfo.frameworks || []).map(f => `<span class="tag tag-framework">${escapeHtml(f)}</span>`).join('');
+  const techStackHtml = (projectInfo.techStack || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('');
+  const frameworksHtml = (projectInfo.frameworks || [])
+    .map((f) => `<span class="tag tag-framework">${escapeHtml(f)}</span>`)
+    .join('');
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -1351,12 +1466,16 @@ a:hover {
     <section id="findings-section" class="section">
       <h2 class="section-title">🔍 Findings</h2>
       <div id="findings-list">
-        ${totalFindings === 0 ? `
+        ${
+          totalFindings === 0
+            ? `
         <div class="no-findings">
           <div class="icon">✅</div>
           <h3>No Findings</h3>
           <p>No security issues were identified in this audit.</p>
-        </div>` : findingsHtml}
+        </div>`
+            : findingsHtml
+        }
       </div>
     </section>
 
@@ -1376,12 +1495,14 @@ a:hover {
               <div class="donut-hole">${totalFindings}</div>
             </div>
             <div class="donut-legend">
-              ${SEVERITY_ORDER.map(sev => `
+              ${SEVERITY_ORDER.map(
+                (sev) => `
               <div class="legend-item">
                 <span class="legend-dot" style="background:${getSeverityColor(sev)}"></span>
                 <span>${sev}</span>
                 <span class="legend-count">${counts[sev]}</span>
-              </div>`).join('')}
+              </div>`,
+              ).join('')}
             </div>
           </div>
         </div>
@@ -1392,16 +1513,20 @@ a:hover {
       <h2 class="section-title">📋 Compliance Mapping</h2>
       <div class="chart-card">
         <div class="detail-meta" style="background:var(--color-surface)">
-          ${SEVERITY_ORDER.map(sev => {
-            const sevFindings = findings.filter(f => f.severity === sev);
-            const complianceTags = [...new Set(sevFindings.map(f => f.compliance).filter(Boolean))];
-            return complianceTags.map(tag => `
+          ${SEVERITY_ORDER.map((sev) => {
+            const sevFindings = findings.filter((f) => f.severity === sev);
+            const complianceTags = [...new Set(sevFindings.map((f) => f.compliance).filter(Boolean))];
+            return complianceTags
+              .map(
+                (tag) => `
             <div class="meta-item">
               <span class="meta-label">${sev}</span>
               <span class="meta-value">${escapeHtml(tag)}</span>
-            </div>`).join('');
+            </div>`,
+              )
+              .join('');
           }).join('')}
-          ${findings.filter(f => f.compliance).length === 0 ? '<p style="color:var(--color-text-secondary)">No compliance data available.</p>' : ''}
+          ${findings.filter((f) => f.compliance).length === 0 ? '<p style="color:var(--color-text-secondary)">No compliance data available.</p>' : ''}
         </div>
       </div>
     </section>

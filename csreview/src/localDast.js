@@ -1,3 +1,4 @@
+// @ts-check
 import fs from 'fs';
 import path from 'path';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
@@ -13,7 +14,9 @@ const SECURITY_HEADERS = [
 ];
 
 function sanitizeAgentName(agentName) {
-  const raw = String(agentName || 'codex').trim().toLowerCase();
+  const raw = String(agentName || 'codex')
+    .trim()
+    .toLowerCase();
   const normalized = raw
     .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/-+/g, '-')
@@ -64,7 +67,9 @@ function extractUrls(text) {
 }
 
 function extractAssignedHost(line) {
-  const match = String(line || '').match(/^\s*[A-Z0-9_]*(?:HOST|URL|URI|ENDPOINT|BASE)[A-Z0-9_]*\s*=\s*["']?([^"'\s#]+)["']?/i);
+  const match = String(line || '').match(
+    /^\s*[A-Z0-9_]*(?:HOST|URL|URI|ENDPOINT|BASE)[A-Z0-9_]*\s*=\s*["']?([^"'\s#]+)["']?/i,
+  );
   if (!match) return null;
   const value = match[1].trim();
   if (!value || value.includes('://')) return null;
@@ -125,7 +130,9 @@ function assertNoExternalRedirect(targetUrl, response, headers) {
   if (response.status < 300 || response.status > 399) return;
   const location = headers.location;
   if (location && !isLocalUrl(location, targetUrl.href)) {
-    throw new Error(`abort Phase 9: local target redirected to external host ${new URL(location, targetUrl.href).hostname}.`);
+    throw new Error(
+      `abort Phase 9: local target redirected to external host ${new URL(location, targetUrl.href).hostname}.`,
+    );
   }
 }
 
@@ -148,7 +155,7 @@ async function fetchHead(fetchImpl, targetUrl, extraHeaders = {}) {
 }
 
 function buildSecurityHeaderResult(targetUrl, response) {
-  const missing = SECURITY_HEADERS.filter(header => !response.headers[header]);
+  const missing = SECURITY_HEADERS.filter((header) => !response.headers[header]);
   const status = missing.length > 0 ? 'DAST-SUSPECTED' : 'DAST-CLEAN';
   return {
     id: 'DAST-HEADERS-1',
@@ -159,12 +166,14 @@ function buildSecurityHeaderResult(targetUrl, response) {
     target: targetUrl.href,
     command: `curl -s -I --max-redirs 0 ${targetUrl.href}`,
     response: responseText(response.status, response.headers),
-    description: missing.length > 0
-      ? `The local response is missing these recommended headers: ${missing.join(', ')}.`
-      : 'The local response included the checked browser security headers.',
-    recommendation: missing.length > 0
-      ? 'Review framework middleware/header configuration before release. HSTS may be intentionally absent for plain localhost development.'
-      : 'Keep header middleware covered by integration tests.',
+    description:
+      missing.length > 0
+        ? `The local response is missing these recommended headers: ${missing.join(', ')}.`
+        : 'The local response included the checked browser security headers.',
+    recommendation:
+      missing.length > 0
+        ? 'Review framework middleware/header configuration before release. HSTS may be intentionally absent for plain localhost development.'
+        : 'Keep header middleware covered by integration tests.',
   };
 }
 
@@ -190,10 +199,12 @@ function buildCorsResult(targetUrl, response) {
 }
 
 function buildMarkdownReport(projectName, targetUrl, envFiles, results) {
-  const rows = results.map(result =>
-    `| ${result.id} | ${result.status} | ${result.severity} | ${result.name} |`
-  ).join('\n');
-  const details = results.map(result => `### ${result.id}: ${result.name}
+  const rows = results
+    .map((result) => `| ${result.id} | ${result.status} | ${result.severity} | ${result.name} |`)
+    .join('\n');
+  const details = results
+    .map(
+      (result) => `### ${result.id}: ${result.name}
 
 - **Status**: ${result.status}
 - **Severity**: ${result.severity}
@@ -211,7 +222,9 @@ ${result.command}
 
 \`\`\`http
 ${result.response}
-\`\`\``).join('\n\n');
+\`\`\``,
+    )
+    .join('\n\n');
 
   return `# Dynamic Analysis (DAST) - Local Complementary Report
 
@@ -235,7 +248,9 @@ ${details}
 }
 
 function buildHtmlReport(projectName, targetUrl, envFiles, results) {
-  const cards = results.map(result => `<article class="card ${escapeHtml(result.status.toLowerCase())}">
+  const cards = results
+    .map(
+      (result) => `<article class="card ${escapeHtml(result.status.toLowerCase())}">
   <h2>${escapeHtml(result.id)}: ${escapeHtml(result.name)}</h2>
   <p><strong>Status:</strong> ${escapeHtml(result.status)} | <strong>Severity:</strong> ${escapeHtml(result.severity)}</p>
   <p><strong>Target:</strong> ${escapeHtml(result.target)}</p>
@@ -245,7 +260,9 @@ function buildHtmlReport(projectName, targetUrl, envFiles, results) {
   <pre><code>${escapeHtml(result.command)}</code></pre>
   <h3>Response received</h3>
   <pre><code>${escapeHtml(result.response)}</code></pre>
-</article>`).join('\n');
+</article>`,
+    )
+    .join('\n');
 
   return `<!doctype html>
 <html lang="en">
@@ -303,15 +320,13 @@ export async function runLocalDast(rootDir, options = {}) {
 
   const baseResponse = await fetchHead(fetchImpl, targetUrl);
   const corsResponse = await fetchHead(fetchImpl, targetUrl, { Origin: 'https://evil.com' });
-  const results = [
-    buildSecurityHeaderResult(targetUrl, baseResponse),
-    buildCorsResult(targetUrl, corsResponse),
-  ];
+  const results = [buildSecurityHeaderResult(targetUrl, baseResponse), buildCorsResult(targetUrl, corsResponse)];
 
   const packageJsonPath = safeResolveInside(absRoot, 'package.json');
-  const projectName = packageJsonPath && fs.existsSync(packageJsonPath)
-    ? JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name || path.basename(absRoot)
-    : path.basename(absRoot);
+  const projectName =
+    packageJsonPath && fs.existsSync(packageJsonPath)
+      ? JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name || path.basename(absRoot)
+      : path.basename(absRoot);
   const agentName = sanitizeAgentName(options.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex');
   const htmlPath = safeResolveInside(outputDir, `${agentName}_local-dast-report.html`);
   const mdPath = safeResolveInside(outputDir, `${agentName}_local-dast-findings.md`);

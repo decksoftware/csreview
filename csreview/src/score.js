@@ -1,3 +1,4 @@
+// @ts-check
 export const SEVERITY_WEIGHTS = {
   CRITICAL: 25,
   HIGH: 15,
@@ -7,7 +8,9 @@ export const SEVERITY_WEIGHTS = {
 };
 
 function normalizeFilePath(filePath) {
-  return String(filePath || '').trim().replace(/\\/g, '/');
+  return String(filePath || '')
+    .trim()
+    .replace(/\\/g, '/');
 }
 
 export function getAuditedFileSet(projectInfo = {}, findings = []) {
@@ -17,7 +20,7 @@ export function getAuditedFileSet(projectInfo = {}, findings = []) {
     ...(projectInfo.configFiles || []),
     ...(projectInfo.depFiles || []),
     ...(projectInfo.baasFiles || []),
-    ...((findings || []).map(finding => finding?.file)),
+    ...(findings || []).map((finding) => finding?.file),
   ]) {
     const normalized = normalizeFilePath(filePath);
     if (normalized) {
@@ -37,14 +40,11 @@ export function calculateSecurityScore(findings = [], projectInfo = {}) {
     return 100;
   }
 
-  const totalWeight = safeFindings.reduce(
-    (sum, finding) => sum + getSeverityWeight(finding?.severity),
-    0,
-  );
+  const totalWeight = safeFindings.reduce((sum, finding) => sum + getSeverityWeight(finding?.severity), 0);
   const fileCount = getAuditedFileSet(projectInfo, safeFindings).size || 1;
   const density = totalWeight / fileCount;
-  const rawScore = 100 - (density * 5);
-  const severities = new Set(safeFindings.map(finding => finding?.severity));
+  const rawScore = 100 - density * 5;
+  const severities = new Set(safeFindings.map((finding) => finding?.severity));
   const severityCap = severities.has('CRITICAL')
     ? 49
     : severities.has('HIGH')

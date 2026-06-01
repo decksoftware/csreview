@@ -1,3 +1,4 @@
+// @ts-check
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,6 +12,7 @@ import {
   normalizeOsvScannerFindings,
   reconcilePartials,
   runAnalysis,
+  validateWindowsCmdArgs,
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
 import { generateMarkdownReport } from '../src/reports/markdown.js';
@@ -65,8 +67,7 @@ function createFakeDastFetch(headers = {}, status = 200) {
           }
         },
         get(name) {
-          const found = Object.entries(headers)
-            .find(([key]) => key.toLowerCase() === String(name).toLowerCase());
+          const found = Object.entries(headers).find(([key]) => key.toLowerCase() === String(name).toLowerCase());
           return found ? found[1] : null;
         },
       },
@@ -85,6 +86,16 @@ test('path helpers normalize local roots and reject traversal targets', () => {
   assert.equal(safeResolveInside(root, '../outside.js'), null);
   assert.equal(safeResolveInside(root, path.join(root, 'src', 'app.js')), null);
   assert.equal(safeResolveInside(root, 'C:\\outside.js'), null);
+});
+
+test('Windows .cmd wrapper rejects shell metacharacters only for cmd-backed tools', () => {
+  assert.throws(
+    () => validateWindowsCmdArgs('npm.cmd', ['audit', 'name&whoami'], 'win32'),
+    /unsafe argument.*npm\.cmd/i,
+  );
+
+  assert.doesNotThrow(() => validateWindowsCmdArgs('semgrep', ['scan', 'name&whoami'], 'win32'));
+  assert.doesNotThrow(() => validateWindowsCmdArgs('npm.cmd', ['name&whoami'], 'linux'));
 });
 
 test('detectVulnerabilities reads files relative to the project root', () => {
@@ -130,7 +141,7 @@ test('generic vulnerability findings redact matched secret values', () => {
     root,
     files: [{ path: 'src/auth.js', language: 'javascript' }],
   });
-  const genericFinding = findings.find(f => f.id.startsWith('HARDCODED_SECRET'));
+  const genericFinding = findings.find((f) => f.id.startsWith('HARDCODED_SECRET'));
 
   assert.ok(genericFinding);
   assert.match(genericFinding.vulnerableCode, /\[REDACTED/);
@@ -146,7 +157,7 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   const result = await runAnalysis(root, { outputDir, runTools: false });
 
   assert.ok(result.totalFindings > 0);
-  assert.ok(result.findings.every(f => f.file !== 'security-report.html'));
+  assert.ok(result.findings.every((f) => f.file !== 'security-report.html'));
   assert.equal(result.toolResults.mode, 'Agent-Only');
   assert.equal(result.toolResults.semgrep.available, false);
   assert.equal(path.basename(result.reports.html), 'codex_security-report.html');
@@ -183,7 +194,7 @@ test('runAnalysis merges and reconciles canonical subagent partial findings', as
   assert.equal(result.partialReconciliation.status, 'ok');
   assert.equal(result.partialReconciliation.partialFindingCount, 1);
   assert.equal(result.partialReconciliation.dedupedPartialFindingCount, 1);
-  assert.ok(result.findings.some(f => f.source === 'subagent:auth'));
+  assert.ok(result.findings.some((f) => f.source === 'subagent:auth'));
 });
 
 test('reconcilePartials flags invalid schemas, count mismatches, and duplicate tool executions', () => {
@@ -198,7 +209,10 @@ test('reconcilePartials flags invalid schemas, count mismatches, and duplicate t
   );
   fs.writeFileSync(
     path.join(partialsDir, 'data.json'),
-    JSON.stringify({ findings: [makeFinding({ id: 'SUBAGENT_2', line: 24, source: 'subagent:data' })], toolExecutions: ['semgrep'] }),
+    JSON.stringify({
+      findings: [makeFinding({ id: 'SUBAGENT_2', line: 24, source: 'subagent:data' })],
+      toolExecutions: ['semgrep'],
+    }),
     'utf8',
   );
 
@@ -218,7 +232,7 @@ test('runAnalysis scans config and environment files for findings', async () => 
   writeFile(root, '.env', `APP_SECRET="${rawSecret}"\n`);
 
   const result = await runAnalysis(root, { outputDir, runTools: false });
-  const envFinding = result.findings.find(f => f.file === '.env');
+  const envFinding = result.findings.find((f) => f.file === '.env');
 
   assert.ok(envFinding);
   assert.doesNotMatch(envFinding.vulnerableCode, new RegExp(rawSecret));
@@ -241,10 +255,11 @@ test('local DAST requires explicit confirmation before sending HTTP requests', a
   const fetchImpl = createFakeDastFetch();
 
   await assert.rejects(
-    () => runLocalDast(root, {
-      targetUrl: 'http://localhost:3000',
-      fetchImpl,
-    }),
+    () =>
+      runLocalDast(root, {
+        targetUrl: 'http://localhost:3000',
+        fetchImpl,
+      }),
     /explicit confirmation/i,
   );
   assert.equal(fetchImpl.calls.length, 0);
@@ -255,11 +270,12 @@ test('local DAST rejects non-local targets and aborts before requests', async ()
   const fetchImpl = createFakeDastFetch();
 
   await assert.rejects(
-    () => runLocalDast(root, {
-      targetUrl: 'https://example.com',
-      confirmed: true,
-      fetchImpl,
-    }),
+    () =>
+      runLocalDast(root, {
+        targetUrl: 'https://example.com',
+        confirmed: true,
+        fetchImpl,
+      }),
     /only localhost or 127\.0\.0\.1/i,
   );
   assert.equal(fetchImpl.calls.length, 0);
@@ -271,11 +287,12 @@ test('local DAST aborts when development env files reference external hosts', as
   writeFile(root, '.env.local', 'API_URL=https://api.example.com\nLOCAL_URL=http://localhost:3000\n');
 
   await assert.rejects(
-    () => runLocalDast(root, {
-      targetUrl: 'http://localhost:3000',
-      confirmed: true,
-      fetchImpl,
-    }),
+    () =>
+      runLocalDast(root, {
+        targetUrl: 'http://localhost:3000',
+        confirmed: true,
+        fetchImpl,
+      }),
     /external host.*api\.example\.com/i,
   );
   assert.equal(fetchImpl.calls.length, 0);
@@ -299,9 +316,9 @@ test('local DAST writes complementary reports with commands and dynamic statuses
 
   assert.equal(path.basename(result.reports.html), 'codex_local-dast-report.html');
   assert.equal(path.basename(result.reports.markdown), 'codex_local-dast-findings.md');
-  assert.ok(result.results.some(item => item.status === 'DAST-SUSPECTED'));
-  assert.ok(result.results.every(item => /^DAST-(SUSPECTED|CLEAN)$/.test(item.status)));
-  assert.ok(fetchImpl.calls.every(call => call.options.redirect === 'manual'));
+  assert.ok(result.results.some((item) => item.status === 'DAST-SUSPECTED'));
+  assert.ok(result.results.every((item) => /^DAST-(SUSPECTED|CLEAN)$/.test(item.status)));
+  assert.ok(fetchImpl.calls.every((call) => call.options.redirect === 'manual'));
 
   const markdown = fs.readFileSync(result.reports.markdown, 'utf8');
   const html = fs.readFileSync(result.reports.html, 'utf8');
@@ -317,45 +334,61 @@ test('tool mode classifier exposes real self-hosted, hybrid, and agent-only stat
   const missing = { available: false };
   const skipped = { available: false, skipped: true };
 
-  assert.equal(classifyToolMode({
-    semgrep: available,
-    npmAudit: available,
-    osvScanner: available,
-  }), 'Self-Hosted');
+  assert.equal(
+    classifyToolMode({
+      semgrep: available,
+      npmAudit: available,
+      osvScanner: available,
+    }),
+    'Self-Hosted',
+  );
 
-  assert.equal(classifyToolMode({
-    semgrep: available,
-    npmAudit: skipped,
-    osvScanner: available,
-  }), 'Self-Hosted');
+  assert.equal(
+    classifyToolMode({
+      semgrep: available,
+      npmAudit: skipped,
+      osvScanner: available,
+    }),
+    'Self-Hosted',
+  );
 
-  assert.equal(classifyToolMode({
-    semgrep: available,
-    npmAudit: missing,
-    osvScanner: missing,
-  }), 'Hybrid');
+  assert.equal(
+    classifyToolMode({
+      semgrep: available,
+      npmAudit: missing,
+      osvScanner: missing,
+    }),
+    'Hybrid',
+  );
 
-  assert.equal(classifyToolMode({
-    semgrep: missing,
-    npmAudit: skipped,
-    osvScanner: missing,
-  }), 'Agent-Only');
+  assert.equal(
+    classifyToolMode({
+      semgrep: missing,
+      npmAudit: skipped,
+      osvScanner: missing,
+    }),
+    'Agent-Only',
+  );
 });
 
 test('shared scoring counts config-only findings against audited files', () => {
-  const score = calculateSecurityScore(
-    [{ severity: 'CRITICAL', file: '.env' }],
-    { files: [], configFiles: ['.env'], depFiles: [], baasFiles: [] },
-  );
+  const score = calculateSecurityScore([{ severity: 'CRITICAL', file: '.env' }], {
+    files: [],
+    configFiles: ['.env'],
+    depFiles: [],
+    baasFiles: [],
+  });
 
   assert.equal(score, 0);
 });
 
 test('shared scoring does not hide critical findings in large projects', () => {
-  const score = calculateSecurityScore(
-    [{ severity: 'CRITICAL', file: 'src/vulnerable.js' }],
-    { files: Array.from({ length: 100 }, (_, index) => `src/file-${index}.js`), configFiles: [], depFiles: [], baasFiles: [] },
-  );
+  const score = calculateSecurityScore([{ severity: 'CRITICAL', file: 'src/vulnerable.js' }], {
+    files: Array.from({ length: 100 }, (_, index) => `src/file-${index}.js`),
+    configFiles: [],
+    depFiles: [],
+    baasFiles: [],
+  });
 
   assert.ok(score <= 49);
 });
@@ -365,23 +398,27 @@ test('HTML report safely embeds JSON data and tolerates missing CWE', () => {
   const outputPath = path.join(root, 'report.html');
   const attack = '</script><script>alert(1)</script>';
 
-  assert.doesNotThrow(() => generateHtmlReport(
-    { name: `demo${attack}`, files: ['src/app.js'], configFiles: [] },
-    [{
-      id: 'TEST_1',
-      severity: 'HIGH',
-      category: 'Test',
-      name: `Injected ${attack}`,
-      description: `Injected ${attack}`,
-      file: 'src/app.js',
-      line: 1,
-      vulnerableCode: attack,
-      owasp: 'N/A',
-      fix: 'Review manually.',
-    }],
-    outputPath,
-    {},
-  ));
+  assert.doesNotThrow(() =>
+    generateHtmlReport(
+      { name: `demo${attack}`, files: ['src/app.js'], configFiles: [] },
+      [
+        {
+          id: 'TEST_1',
+          severity: 'HIGH',
+          category: 'Test',
+          name: `Injected ${attack}`,
+          description: `Injected ${attack}`,
+          file: 'src/app.js',
+          line: 1,
+          vulnerableCode: attack,
+          owasp: 'N/A',
+          fix: 'Review manually.',
+        },
+      ],
+      outputPath,
+      {},
+    ),
+  );
 
   const html = fs.readFileSync(outputPath, 'utf8');
   assert.doesNotMatch(html, /<\/script><script>alert\(1\)<\/script>/);
@@ -395,18 +432,20 @@ test('HTML report safely renders finding attributes', () => {
 
   generateHtmlReport(
     { name: 'demo', files: ['src/app.js'], configFiles: [] },
-    [{
-      id: attack,
-      severity: 'HIGH',
-      category: attack,
-      name: attack,
-      description: attack,
-      file: `src/${attack}.js`,
-      line: 1,
-      vulnerableCode: attack,
-      owasp: 'N/A',
-      fix: 'Review manually.',
-    }],
+    [
+      {
+        id: attack,
+        severity: 'HIGH',
+        category: attack,
+        name: attack,
+        description: attack,
+        file: `src/${attack}.js`,
+        line: 1,
+        vulnerableCode: attack,
+        owasp: 'N/A',
+        fix: 'Review manually.',
+      },
+    ],
     outputPath,
     {},
   );
@@ -421,12 +460,10 @@ test('Markdown report uses package version and analysis duration metadata', () =
   const root = makeTempProject();
   const outputPath = path.join(root, 'report.md');
 
-  generateMarkdownReport(
-    { name: 'demo', files: ['src/app.js'], configFiles: [] },
-    [],
-    outputPath,
-    { packageVersion: '0.0.1', durationMs: 2500 },
-  );
+  generateMarkdownReport({ name: 'demo', files: ['src/app.js'], configFiles: [] }, [], outputPath, {
+    packageVersion: '0.0.1',
+    durationMs: 2500,
+  });
 
   const markdown = fs.readFileSync(outputPath, 'utf8');
   assert.match(markdown, /\*\*Scanner\*\*: CSReview v0\.0\.1/);
@@ -463,18 +500,26 @@ test('detector avoids common JavaScript false positives', () => {
     ],
   });
 
-  assert.ok(findings.some(f => f.file === 'src/unsafe.py' && f.id.startsWith('PY_DESERIALIZE')));
-  assert.ok(findings.every(f => !(f.file === 'src/regex.js' && f.id.startsWith('UNSAFE_EVAL'))));
-  assert.ok(findings.every(f => !(f.file === 'src/regex.js' && f.id.startsWith('COMMAND_INJECTION'))));
-  assert.ok(findings.every(f => !(f.file === 'src/docs.js' && f.id.startsWith('PY_DESERIALIZE'))));
-  assert.ok(findings.every(f => !(f.file === 'src/login.js' && f.id.startsWith('GENERIC_PASSWORD'))));
+  assert.ok(findings.some((f) => f.file === 'src/unsafe.py' && f.id.startsWith('PY_DESERIALIZE')));
+  assert.ok(findings.every((f) => !(f.file === 'src/regex.js' && f.id.startsWith('UNSAFE_EVAL'))));
+  assert.ok(findings.every((f) => !(f.file === 'src/regex.js' && f.id.startsWith('COMMAND_INJECTION'))));
+  assert.ok(findings.every((f) => !(f.file === 'src/docs.js' && f.id.startsWith('PY_DESERIALIZE'))));
+  assert.ok(findings.every((f) => !(f.file === 'src/login.js' && f.id.startsWith('GENERIC_PASSWORD'))));
 });
 
 test('detector suppresses noisy unconfirmed heuristics without same-line input context', () => {
   const root = makeTempProject();
   writeFile(root, 'src/random.js', 'const sample = Math.random();\nconst token = Math.random();\n');
-  writeFile(root, 'src/View.vue', '<template>\n<div v-html="trustedContent"></div>\n<div v-html="userInput"></div>\n</template>\n');
-  writeFile(root, 'main.go', 'package main\nimport "unsafe"\nfunc main() { var x int; _ = unsafe.Pointer(&x) }\nfunc read(userBuffer []byte) { _ = unsafe.Pointer(userBuffer) }\n');
+  writeFile(
+    root,
+    'src/View.vue',
+    '<template>\n<div v-html="trustedContent"></div>\n<div v-html="userInput"></div>\n</template>\n',
+  );
+  writeFile(
+    root,
+    'main.go',
+    'package main\nimport "unsafe"\nfunc main() { var x int; _ = unsafe.Pointer(&x) }\nfunc read(userBuffer []byte) { _ = unsafe.Pointer(userBuffer) }\n',
+  );
 
   const findings = detectVulnerabilities({
     root,
@@ -485,12 +530,12 @@ test('detector suppresses noisy unconfirmed heuristics without same-line input c
     ],
   });
 
-  assert.ok(findings.every(f => !(f.id.startsWith('WEAK_RANDOM_GENERAL') && /sample/.test(f.vulnerableCode))));
-  assert.ok(findings.some(f => f.id.startsWith('WEAK_RANDOM_GENERAL') && /token/.test(f.vulnerableCode)));
-  assert.ok(findings.every(f => !(f.id.startsWith('XSS_VUE_VHTML') && /trustedContent/.test(f.vulnerableCode))));
-  assert.ok(findings.some(f => f.id.startsWith('XSS_VUE_VHTML') && /userInput/.test(f.vulnerableCode)));
-  assert.ok(findings.every(f => !(f.id.startsWith('GO_UNSAFE_POINTER') && /&x/.test(f.vulnerableCode))));
-  assert.ok(findings.some(f => f.id.startsWith('GO_UNSAFE_POINTER') && /userBuffer/.test(f.vulnerableCode)));
+  assert.ok(findings.every((f) => !(f.id.startsWith('WEAK_RANDOM_GENERAL') && /sample/.test(f.vulnerableCode))));
+  assert.ok(findings.some((f) => f.id.startsWith('WEAK_RANDOM_GENERAL') && /token/.test(f.vulnerableCode)));
+  assert.ok(findings.every((f) => !(f.id.startsWith('XSS_VUE_VHTML') && /trustedContent/.test(f.vulnerableCode))));
+  assert.ok(findings.some((f) => f.id.startsWith('XSS_VUE_VHTML') && /userInput/.test(f.vulnerableCode)));
+  assert.ok(findings.every((f) => !(f.id.startsWith('GO_UNSAFE_POINTER') && /&x/.test(f.vulnerableCode))));
+  assert.ok(findings.some((f) => f.id.startsWith('GO_UNSAFE_POINTER') && /userBuffer/.test(f.vulnerableCode)));
 });
 
 test('detector skips generic vulnerability checks in minified files but still scans secrets', () => {
@@ -504,9 +549,9 @@ test('detector skips generic vulnerability checks in minified files but still sc
     files: [{ path: 'dist/app.min.js', language: 'javascript' }],
   });
 
-  assert.ok(findings.some(f => f.category === 'Secrets'));
-  assert.ok(findings.every(f => !f.id.startsWith('XSS_INNERHTML')));
-  assert.ok(findings.every(f => !String(f.vulnerableCode).includes(secret)));
+  assert.ok(findings.some((f) => f.category === 'Secrets'));
+  assert.ok(findings.every((f) => !f.id.startsWith('XSS_INNERHTML')));
+  assert.ok(findings.every((f) => !String(f.vulnerableCode).includes(secret)));
 });
 
 test('generic vulnerability evidence is only redacted for secret-like patterns', () => {
@@ -522,8 +567,8 @@ test('generic vulnerability evidence is only redacted for secret-like patterns',
       { path: 'src/sql.js', language: 'javascript' },
     ],
   });
-  const secretFinding = findings.find(f => f.id.startsWith('HARDCODED_SECRET'));
-  const sqlFinding = findings.find(f => f.id.startsWith('SQL_INJECTION'));
+  const secretFinding = findings.find((f) => f.id.startsWith('HARDCODED_SECRET'));
+  const sqlFinding = findings.find((f) => f.id.startsWith('SQL_INJECTION'));
 
   assert.ok(secretFinding);
   assert.match(secretFinding.vulnerableCode, /\[REDACTED/);
@@ -573,10 +618,10 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const skillInstallation = pkg.csreview?.skillInstallation || {};
   const requiredTools = pkg.csreview?.requiredExternalTools || [];
   const recommendedTools = pkg.csreview?.recommendedExternalTools || [];
-  const semgrep = requiredTools.find(tool => tool.name === 'semgrep');
-  const osvScanner = recommendedTools.find(tool => tool.name === 'osv-scanner');
+  const semgrep = requiredTools.find((tool) => tool.name === 'semgrep');
+  const osvScanner = recommendedTools.find((tool) => tool.name === 'osv-scanner');
 
-  assert.equal(pkg.version, '0.1.1');
+  assert.equal(pkg.version, '0.1.2');
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
   assert.ok(pkg.keywords.includes('semgrep'));
@@ -696,7 +741,7 @@ test('README exposes the canonical SKILL.md for GitHub landing review', () => {
   const readme = fs.readFileSync('../README.md', 'utf8').replace(/\r\n/g, '\n');
   const skill = fs.readFileSync('SKILL.md', 'utf8').replace(/\r\n/g, '\n').trim();
   const mirror = readme.match(
-    /<!-- BEGIN CSREVIEW_SKILL_MD -->\n````markdown\n([\s\S]*?)\n````\n<!-- END CSREVIEW_SKILL_MD -->/
+    /<!-- BEGIN CSREVIEW_SKILL_MD -->\n````markdown\n([\s\S]*?)\n````\n<!-- END CSREVIEW_SKILL_MD -->/,
   );
 
   assert.ok(mirror, 'README must include a mirrored full SKILL.md block');
@@ -722,7 +767,10 @@ test('documentation requires global skill installation by default', () => {
   assert.match(docs, /global agent skill/i);
   assert.match(docs, /~\/\.codex\/skills\/csreview/);
   assert.match(docs, /~\/\.trae\/skills\/csreview/);
-  assert.match(docs, /MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project/i);
+  assert.match(
+    docs,
+    /MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project/i,
+  );
   assert.match(docs, /unless the user explicitly asks for project-local installation/i);
 });
 
@@ -783,11 +831,13 @@ test('normalizes npm audit output into read-only dependency findings', () => {
         name: 'lodash',
         severity: 'high',
         isDirect: true,
-        via: [{
-          title: 'Prototype Pollution in lodash',
-          cwe: ['CWE-1321'],
-          url: 'https://github.com/advisories/GHSA-test',
-        }],
+        via: [
+          {
+            title: 'Prototype Pollution in lodash',
+            cwe: ['CWE-1321'],
+            url: 'https://github.com/advisories/GHSA-test',
+          },
+        ],
         range: '<4.17.21',
         nodes: ['node_modules/lodash'],
         fixAvailable: { name: 'lodash', version: '4.17.21', isSemVerMajor: false },
@@ -805,31 +855,42 @@ test('normalizes npm audit output into read-only dependency findings', () => {
 
 test('normalizes OSV-Scanner output into dependency findings', () => {
   const root = path.resolve('.');
-  const findings = normalizeOsvScannerFindings({
-    results: [{
-      source: {
-        path: path.join(root, 'package-lock.json'),
-        type: 'lockfile',
-      },
-      packages: [{
-        package: {
-          name: 'debug',
-          version: '2.6.8',
-          ecosystem: 'npm',
+  const findings = normalizeOsvScannerFindings(
+    {
+      results: [
+        {
+          source: {
+            path: path.join(root, 'package-lock.json'),
+            type: 'lockfile',
+          },
+          packages: [
+            {
+              package: {
+                name: 'debug',
+                version: '2.6.8',
+                ecosystem: 'npm',
+              },
+              vulnerabilities: [
+                {
+                  id: 'GHSA-test',
+                  aliases: ['CVE-2099-0001'],
+                  summary: 'debug has a denial of service vulnerability',
+                  database_specific: { severity: 'HIGH' },
+                  references: [{ url: 'https://osv.dev/GHSA-test' }],
+                  affected: [
+                    {
+                      ranges: [{ events: [{ fixed: '2.6.9' }] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
         },
-        vulnerabilities: [{
-          id: 'GHSA-test',
-          aliases: ['CVE-2099-0001'],
-          summary: 'debug has a denial of service vulnerability',
-          database_specific: { severity: 'HIGH' },
-          references: [{ url: 'https://osv.dev/GHSA-test' }],
-          affected: [{
-            ranges: [{ events: [{ fixed: '2.6.9' }] }],
-          }],
-        }],
-      }],
-    }],
-  }, root);
+      ],
+    },
+    root,
+  );
 
   assert.equal(findings.length, 1);
   assert.equal(findings[0].source, 'osv-scanner');
