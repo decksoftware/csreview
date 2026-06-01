@@ -9,8 +9,8 @@ description: "Ultra-deep security audit and pentest analysis for codebases. Gene
 
 This skill performs ultra-deep security analysis (automated pentest level) on codebases across multiple languages, frameworks, and platforms. It identifies vulnerabilities, data leakage risks, misconfigurations, and security flaws, then generates:
 
-1. **HTML Report** (`security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
-2. **Markdown Report** (`security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
+1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
+2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
 
 **CSReview is READ-ONLY**: It never modifies, deletes, moves, or creates source code in the analyzed project. It only identifies problems, locates them precisely, and suggests remediation approaches based on the frameworks and technologies in use. The actual fixes are applied later by the human developer or a coding agent after understanding the project context, schema, tests, and regression risk. When encountering unfamiliar frameworks, CSReview researches official documentation and community forums to provide accurate recommendations.
 
@@ -26,6 +26,16 @@ This skill performs ultra-deep security analysis (automated pentest level) on co
 - Official package, API, or SDK documentation for the exact version or major version in use
 
 When external research is used, include source names and URLs in the finding references. Prefer official documentation and vendor advisories over generic blog posts. If sources disagree or the version cannot be confirmed, mark the finding as lower confidence and explain the uncertainty in the report.
+
+**Report Handoff Protocol**: After every CSReview run, the agent MUST present two explicit paths:
+
+- **Agent name prefix**: report filenames MUST begin with the coding agent name in lowercase, for example `codex_security-report.html` and `codex_security-findings.md`. Other agents must replace `codex` with their own name, such as `claude_security-report.html`.
+- **MUST NOT generate generic report names**: `security-report.html`, `security-findings.md`, `_security-report.html`, `_security-findings.md`, `csreview-report.html`, and `csreview-report.md` are invalid handoff names because they hide which agent produced the analysis.
+- **CLI identity**: pass `--agent-name <agent>` on CLI runs or set `CSREVIEW_AGENT_NAME=<agent>` before running CSReview. Examples: `csreview . --agent-name codex`, `csreview . --agent-name claude`, `CSREVIEW_AGENT_NAME=qwen csreview .`.
+- **HTML report path**: the absolute path to `csreview-reports/codex_security-report.html` or the configured output HTML file. Tell the user this is the file to click/open in a browser for human reading. If the environment has an available browser-opening tool and the user asked to open it, open the HTML report in the browser.
+- **Markdown report path**: the absolute path to `csreview-reports/codex_security-findings.md` or the configured output Markdown file. Tell the user and the coding agent that this is the file the coding agent must analyze before planning any remediation.
+
+The coding agent must not infer findings from the verbal summary alone. For remediation work, it must read the Markdown report path first, then inspect the referenced source files, framework documentation, schemas, tests, and security advisories before proposing or applying changes.
 
 The analysis covers 8 phases: Reconnaissance, Ultra-Deep Security, Database Security, SLSA 3 Supply Chain, OWASP ASVS, Compliance (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA), Vibe Coding Protection, and Dual Report Generation.
 
@@ -47,7 +57,7 @@ CSReview includes built-in **Code Review** capabilities (equivalent to codex:rev
 - User requests adversarial review (`@csreview adversarial [files]`)
 - User requests security-focused review (`@csreview security-review [files]`)
 - User wants to review changes in a PR or branch (`@csreview request-review [scope]`)
-- User wants a remediation plan from a report (`@csreview review security-findings.md`)
+- User wants a remediation plan from a report (`@csreview review csreview-reports/codex_security-findings.md`)
 
 ## Supported Technologies
 
@@ -1173,7 +1183,7 @@ Generate TWO reports in the project root:
 
 ## Report 1: HTML Report (For Humans)
 
-File: `security-report.html`
+File: `csreview-reports/<agent>_security-report.html`
 
 ### Executive Summary Section
 - **Overall Security Score**: 0-100 scale with color coding
@@ -1352,7 +1362,7 @@ For each vulnerability found:
 
 ## Report 2: Markdown Report (For AI Agents)
 
-File: `security-findings.md`
+File: `csreview-reports/<agent>_security-findings.md`
 
 This report is structured for humans and AI coding agents to parse, understand, prioritize, and plan remediations. It contains machine-readable findings with exact file locations, vulnerable code evidence, exploitation context, and recommended remediation approaches. It is **not** permission for CSReview to change the audited code. **Always generated in English** regardless of user language.
 
@@ -1571,7 +1581,7 @@ When fixing these findings (note: CSReview only reports; the coding agent or dev
 1. Read the vulnerable file at the specified line numbers
 2. Understand the context before applying the fix
 3. If the framework is unfamiliar, research official documentation before applying fixes
-4. Apply the corrected code exactly as shown
+4. Treat the recommendation as guidance, not a patch; inspect the framework, schema, tests, and surrounding code before changing anything
 5. Verify the fix doesn't break existing functionality
 6. Mark the finding as FIXED after successful application
 7. Run tests to ensure no regressions
@@ -1734,7 +1744,7 @@ When CSReview is invoked, it can operate in any of these modes:
 @csreview adversarial [files]                → Adversarial review (Mode 2)
 @csreview security-review [files]            → Security code review (Mode 3)
 @csreview request-review [PR/branch/commit]  → Request review of changes (Mode 4)
-@csreview review security-findings.md        → Plan remediation from report without CSReview editing source code
+@csreview review csreview-reports/codex_security-findings.md        → Plan remediation from report without CSReview editing source code
 ```
 
 ## Execution Workflow
@@ -1752,9 +1762,11 @@ When invoked, follow these steps:
 9. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
 10. **Progress updates**: Keep user informed of analysis progress throughout
 11. **Phase 8 - Report Generation**: Create BOTH reports:
-    - `security-report.html` (visual report in user's language for human review)
-    - `security-findings.md` (structured report in English for human/coding-agent remediation planning)
-12. **Deliver reports**: Provide paths to both generated files
+    - `csreview-reports/<agent>_security-report.html` (visual report in user's language for human review)
+    - `csreview-reports/<agent>_security-findings.md` (structured report in English for human/coding-agent remediation planning)
+12. **Deliver reports**: Provide absolute paths to both generated files:
+    - HTML report path for the user to click/open in a browser
+    - Markdown report path for the coding agent to analyze before remediation
 13. **Summary**: Give brief verbal summary of critical/high findings including tool-detected vs AI-estimated findings, compliance gaps, vibe coding risks, and Firebase cost issues
 14. **Offer next step**: Ask whether the user wants a prioritized remediation plan or wants a separate coding agent session to apply selected fixes with project-context validation.
 
@@ -1803,11 +1815,11 @@ User: "@csreview review src/auth.ts src/middleware/"
 User: "@csreview adversarial src/api/payments/"
 User: "@csreview security-review src/components/"
 User: "@csreview request-review main..feature/auth"
-User: "@csreview review security-findings.md"
+User: "@csreview review csreview-reports/codex_security-findings.md"
 
 ## Output
 
-- **Primary**: `security-report.html` in project root (visual report in user's language for human review)
-- **Secondary**: `security-findings.md` in project root (structured report in English for remediation planning)
+- **Primary**: `csreview-reports/<agent>_security-report.html` under the selected output directory (visual report in user's language for human review)
+- **Secondary**: `csreview-reports/<agent>_security-findings.md` under the selected output directory (structured report in English for remediation planning)
 - **Tertiary**: Verbal summary of critical/high findings in chat including compliance gaps and vibe coding risks
 - **Optional**: JSON export available via HTML report button

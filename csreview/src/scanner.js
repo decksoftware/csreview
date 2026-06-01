@@ -54,6 +54,8 @@ const IGNORE_PATTERNS = [
   '**/security-findings.md',
   '**/csreview-report.html',
   '**/csreview-report.md',
+  '**/*_security-report.html',
+  '**/*_security-findings.md',
   '**/csreview-reports/**'
 ];
 

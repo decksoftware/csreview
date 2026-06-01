@@ -184,6 +184,11 @@ function redactMatch(match) {
   return redactSecret(fullMatch);
 }
 
+function redactFindingLine(line, match) {
+  const redactedMatch = redactMatch(match);
+  return line.trim().replace(match[0], redactedMatch);
+}
+
 export function detectSecrets(content, filePath) {
   const findings = [];
   const lines = content.split('\n');
@@ -257,7 +262,7 @@ function detectInContent(content, filePath, language) {
           description: pattern.description,
           file: filePath,
           line: lineIdx + 1,
-          vulnerableCode: line.trim(),
+          vulnerableCode: redactFindingLine(line, match),
           cwe: pattern.cwe,
           owasp: pattern.owasp,
           vibeRisk: pattern.vibeRisk,
@@ -290,11 +295,13 @@ export function detectVulnerabilities(projectInfo) {
     const language = file.language && file.language !== 'unknown' ? file.language : LANGUAGE_MAP[ext] || null;
 
     let content;
+    let isMinified = false;
     try {
       const absolutePath = projectInfo.root ? path.join(projectInfo.root, file.path) : file.path;
       const result = readFileSafe(absolutePath);
       if (!result || result.isBinary || !result.content) continue;
       content = result.content;
+      isMinified = Boolean(result.isMinified);
     } catch {
       continue;
     }
@@ -302,6 +309,8 @@ export function detectVulnerabilities(projectInfo) {
 
     const secretFindings = detectSecrets(content, file.path);
     allFindings.push(...secretFindings);
+
+    if (isMinified) continue;
 
     const vulnFindings = detectInContent(content, file.path, language);
     allFindings.push(...vulnFindings);

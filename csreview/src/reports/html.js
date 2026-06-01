@@ -19,6 +19,27 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function safeJsonForScript(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003C')
+    .replace(/>/g, '\\u003E')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+function renderCweMeta(cwe) {
+  if (!cwe) {
+    return '<span class="meta-value">N/A</span>';
+  }
+  const normalized = String(cwe);
+  const cweId = normalized.replace('CWE-', '');
+  if (!/^CWE-\d+$/i.test(normalized)) {
+    return `<span class="meta-value">${escapeHtml(normalized)}</span>`;
+  }
+  return `<span class="meta-value"><a href="https://cwe.mitre.org/data/definitions/${escapeHtml(cweId)}.html" target="_blank" rel="noopener noreferrer">${escapeHtml(normalized)}</a></span>`;
+}
+
 function calculateScore(findings) {
   const weights = { CRITICAL: 25, HIGH: 15, MEDIUM: 8, LOW: 3, INFO: 0 };
   const totalWeight = findings.reduce((sum, f) => sum + (weights[f.severity] || 0), 0);
@@ -220,7 +241,7 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
           </div>
           <div class="detail-meta">
             <div class="meta-item"><span class="meta-label">Category</span><span class="meta-value">${icon} ${escapeHtml(f.category)}</span></div>
-            <div class="meta-item"><span class="meta-label">CWE</span><span class="meta-value"><a href="https://cwe.mitre.org/data/definitions/${escapeHtml(f.cwe.replace('CWE-', ''))}.html" target="_blank" rel="noopener noreferrer">${escapeHtml(f.cwe)}</a></span></div>
+            <div class="meta-item"><span class="meta-label">CWE</span>${renderCweMeta(f.cwe)}</div>
             <div class="meta-item"><span class="meta-label">OWASP</span><span class="meta-value">${escapeHtml(f.owasp)}</span></div>
             <div class="meta-item"><span class="meta-label">Confidence</span><span class="meta-value confidence-${(f.confidence || 'medium').toLowerCase()}">${escapeHtml(f.confidence || 'MEDIUM')}</span></div>
             <div class="meta-item"><span class="meta-label">Compliance</span><span class="meta-value">${escapeHtml(f.compliance || 'N/A')}</span></div>
@@ -1379,8 +1400,8 @@ a:hover {
 </main>
 
 <script>
-const projectData = ${JSON.stringify(projectInfo)};
-const findingsData = ${JSON.stringify(findings)};
+const projectData = ${safeJsonForScript(projectInfo)};
+const findingsData = ${safeJsonForScript(findings)};
 
 function toggleFinding(header) {
   const card = header.closest('.finding-card');

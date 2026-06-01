@@ -80,6 +80,14 @@ function enrichFiles(filePaths) {
   }));
 }
 
+function uniqueAuditFiles(projectInfo) {
+  return [
+    ...(projectInfo.files || []),
+    ...(projectInfo.configFiles || []),
+    ...(projectInfo.baasFiles || []),
+  ].filter((filePath, index, all) => filePath && all.indexOf(filePath) === index);
+}
+
 function calculateDensityScore(findings, fileCount) {
   if (!fileCount) return 100;
   let penalty = 0;
@@ -99,6 +107,14 @@ function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function sanitizeAgentName(agentName) {
+  return String(agentName || 'codex')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'codex';
 }
 
 function createSkippedToolResult(reason) {
@@ -472,10 +488,11 @@ export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
   const absRoot = resolve(rootDir);
   const outputDir = options.outputDir || resolve(absRoot, 'csreview-reports');
+  const agentName = sanitizeAgentName(options.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex');
 
   const projectInfo = await scanProject(absRoot);
 
-  const enrichedFiles = enrichFiles(projectInfo.files);
+  const enrichedFiles = enrichFiles(uniqueAuditFiles(projectInfo));
 
   const detectorInput = {
     ...projectInfo,
@@ -496,8 +513,8 @@ export async function runAnalysis(rootDir, options = {}) {
     mkdirSync(outputDir, { recursive: true });
   }
 
-  const htmlPath = resolve(outputDir, 'csreview-report.html');
-  const mdPath = resolve(outputDir, 'csreview-report.md');
+  const htmlPath = resolve(outputDir, `${agentName}_security-report.html`);
+  const mdPath = resolve(outputDir, `${agentName}_security-findings.md`);
 
   generateHtmlReport(projectInfo, findings, htmlPath, { toolResults });
   generateMarkdownReport(projectInfo, findings, mdPath, { toolResults });

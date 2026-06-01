@@ -47,6 +47,18 @@ Every coding agent using CSReview must research externally when it is unsure abo
 
 Do not guess. If external sources disagree or the exact version cannot be confirmed, CSReview must mark the finding as lower confidence and explain the uncertainty in the report.
 
+### Report Handoff
+
+After every run, CSReview must show the user:
+
+- **Agent name prefix**: report filenames begin with the coding agent name, for example `csreview-reports/codex_security-report.html` and `csreview-reports/codex_security-findings.md`. Other agents replace `codex` with their own name.
+- Generic names such as `security-report.html`, `security-findings.md`, `csreview-report.html`, and `csreview-report.md` are invalid because they hide which agent produced the analysis.
+- Use `--agent-name <agent>` or `CSREVIEW_AGENT_NAME=<agent>` so each agent writes its own report files.
+- **HTML report path**: `csreview-reports/<agent>_security-report.html` or the configured output HTML file, for the user to click/open in a browser.
+- **Markdown report path**: `csreview-reports/<agent>_security-findings.md` or the configured output Markdown file, for the coding agent to read before planning remediation.
+
+The verbal summary is not enough for implementation. A coding agent must analyze the Markdown report and then inspect the referenced source files, schemas, tests, framework documentation, and security advisories before proposing or applying changes.
+
 ### Why This Exists
 
 Security vulnerabilities cost companies billions annually. Most development teams lack dedicated security engineers to review code before deployment. With the rise of **vibe coding** (non-technical users building software with AI agents), security risks have multiplied. CSReview bridges this gap by providing:
@@ -133,7 +145,7 @@ CSReview includes a complete code review system - no additional skills or plugin
 | **Adversarial Review** | `@csreview adversarial [files]` | Red-team mindset: boundary conditions, failure modes, edge cases |
 | **Security Review** | `@csreview security-review [files]` | Security-focused review with vulnerability detection |
 | **Request Review** | `@csreview request-review [scope]` | Review of PR/branch/commit with change-type detection |
-| **Remediation Planning** | `@csreview review security-findings.md` | Parse the report, understand context, and plan fixes for a human or coding agent to apply deliberately |
+| **Remediation Planning** | `@csreview review csreview-reports/codex_security-findings.md` | Parse the report, understand context, and plan fixes for a human or coding agent to apply deliberately |
 
 ### Analysis Capabilities
 
@@ -199,7 +211,7 @@ CSReview includes a complete code review system - no additional skills or plugin
 
 ### Output Reports
 
-1. **`security-report.html`** - Visual dashboard for humans (in user's language)
+1. **`csreview-reports/<agent>_security-report.html`** - Visual dashboard for humans (in user's language)
    - Security score (0-100)
    - SLSA Level indicator
    - OWASP ASVS compliance percentage
@@ -213,7 +225,7 @@ CSReview includes a complete code review system - no additional skills or plugin
    - Recommended fixes with corrected code
    - OWASP/CWE references
 
-2. **`security-findings.md`** - Structured report for AI agents (always in English)
+2. **`csreview-reports/<agent>_security-findings.md`** - Structured report for AI agents (always in English)
    - Machine-readable findings
    - Exact file paths and line numbers
    - Vibe Risk scoring (AI-Likely, AI-Possible, Human-Likely)
@@ -425,7 +437,7 @@ Simply ask your AI coding assistant:
 
 ### Plan Remediation from Report
 ``` 
-@csreview review security-findings.md
+@csreview review csreview-reports/codex_security-findings.md
 ```
 
 ## Severity Classification

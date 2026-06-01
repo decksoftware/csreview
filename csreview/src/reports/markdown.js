@@ -463,7 +463,7 @@ ${f.vulnerableCode}
       : 'No vulnerable code snippet available.';
 
     const afterBlock = hasFix
-      ? `\`\`\`${lang}
+      ? `\`\`\`text
 ${f.fix}
 \`\`\``
       : 'No remediation hint available. Manual security review required.';

@@ -41,6 +41,7 @@ ${chalk.bold('USAGE:')}
 
 ${chalk.bold('OPTIONS:')}
   --output, -o <dir>    Output directory for reports (default: <target>/csreview-reports/)
+  --agent-name <name>   Prefix report files with the coding agent name (default: codex)
   --doctor              Check external security tools without scanning source code
   --help, -h            Show this help message
 
@@ -48,12 +49,13 @@ ${chalk.bold('EXAMPLES:')}
   csreview .
   csreview /path/to/project
   csreview . --output ./security-reports
+  csreview . --agent-name claude
   csreview --doctor .
 
 ${chalk.bold('OUTPUT:')}
   Generates two reports in the output directory:
-  - csreview-report.html   - Human-readable HTML report with charts and navigation
-  - csreview-report.md     - Machine-parseable Markdown for AI coding agents
+  - <agent>_security-report.html    - Human-readable HTML report with charts and navigation
+  - <agent>_security-findings.md    - Machine-parseable Markdown for AI coding agents
 
 ${chalk.bold('SECURITY TOOLS:')}
   CSReview is read-only for audited source code. It writes reports only.
@@ -69,10 +71,16 @@ ${chalk.bold('SECURITY TOOLS:')}
 
 const targetDir = resolve(args[0]);
 let outputDir = null;
+let agentName = process.env.CSREVIEW_AGENT_NAME || 'codex';
 
 const outputIdx = args.findIndex(a => a === '--output' || a === '-o');
 if (outputIdx !== -1 && args[outputIdx + 1]) {
   outputDir = resolve(args[outputIdx + 1]);
+}
+
+const agentNameIdx = args.findIndex(a => a === '--agent-name');
+if (agentNameIdx !== -1 && args[agentNameIdx + 1]) {
+  agentName = args[agentNameIdx + 1];
 }
 
 if (!existsSync(targetDir)) {
@@ -86,7 +94,7 @@ console.log(chalk.gray(`  Output:  ${outputDir || resolve(targetDir, 'csreview-r
 console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
 
 try {
-  const result = await runAnalysis(targetDir, { outputDir });
+  const result = await runAnalysis(targetDir, { outputDir, agentName });
 
   console.log(chalk.bold('\n  ----------------------------------------\n'));
   console.log(chalk.bold('  Scan Complete\n'));
