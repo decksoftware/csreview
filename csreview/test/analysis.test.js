@@ -106,6 +106,17 @@ test('runAnalysis scans config and environment files for findings', async () => 
   assert.ok(result.score < 100);
 });
 
+test('runAnalysis sanitizes agent report names without regex-heavy processing', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'out');
+  const agentName = `---Codex Security!!! 2026---${'!'.repeat(1000)}`;
+
+  const result = await runAnalysis(root, { outputDir, runTools: false, agentName });
+
+  assert.equal(path.basename(result.reports.html), 'codex-security-2026_security-report.html');
+  assert.equal(path.basename(result.reports.markdown), 'codex-security-2026_security-findings.md');
+});
+
 test('shared scoring counts config-only findings against audited files', () => {
   const score = calculateSecurityScore(
     [{ severity: 'CRITICAL', file: '.env' }],

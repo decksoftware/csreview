@@ -1,5 +1,6 @@
 import path from 'path';
 import { readFileSafe } from './scanner.js';
+import { safeResolveInside } from './pathSafety.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
@@ -295,7 +296,8 @@ export function detectVulnerabilities(projectInfo) {
     let content;
     let isMinified = false;
     try {
-      const absolutePath = projectInfo.root ? path.join(projectInfo.root, file.path) : file.path;
+      const absolutePath = projectInfo.root ? safeResolveInside(projectInfo.root, file.path) : file.path;
+      if (!absolutePath) continue;
       const result = readFileSafe(absolutePath);
       if (!result || result.isBinary || !result.content) continue;
       content = result.content;
