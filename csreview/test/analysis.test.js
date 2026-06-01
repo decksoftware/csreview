@@ -378,6 +378,18 @@ test('skill recommends stack-native read-only lint and scanner tools', () => {
   assert.match(docs, /golangci-lint/);
 });
 
+test('README exposes the canonical SKILL.md for GitHub landing review', () => {
+  const readme = fs.readFileSync('../README.md', 'utf8').replace(/\r\n/g, '\n');
+  const skill = fs.readFileSync('SKILL.md', 'utf8').replace(/\r\n/g, '\n').trim();
+  const mirror = readme.match(
+    /<!-- BEGIN CSREVIEW_SKILL_MD -->\n````markdown\n([\s\S]*?)\n````\n<!-- END CSREVIEW_SKILL_MD -->/
+  );
+
+  assert.ok(mirror, 'README must include a mirrored full SKILL.md block');
+  assert.equal(mirror[1].trim(), skill);
+  assert.match(readme, /Expand the full SKILL\.md read by coding agents/i);
+});
+
 test('documentation aligns report handoff names and avoids exact patch instructions', () => {
   const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
 
