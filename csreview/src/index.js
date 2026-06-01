@@ -1,4 +1,4 @@
-import { relative, resolve } from 'path';
+import { relative } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync } from 'fs';
@@ -6,11 +6,17 @@ import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
 import { generateMarkdownReport } from './reports/markdown.js';
-import { calculateSecurityScore } from './scoring.js';
+import { calculateSecurityScore } from './score.js';
+import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
 const execFileAsync = promisify(execFile);
+const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
+const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'osv-scanner', 'python3', 'python']);
 
 function executable(command) {
+  if (!TOOL_COMMANDS.has(command)) {
+    throw new Error(`Unsupported external tool: ${command}`);
+  }
   if (process.platform === 'win32' && ['npm', 'npx', 'yarn', 'pnpm'].includes(command)) {
     return `${command}.cmd`;
   }
@@ -21,7 +27,7 @@ function execTool(command, args, options = {}) {
   const commandPath = executable(command);
   const needsShell = process.platform === 'win32' && commandPath.endsWith('.cmd');
   if (needsShell) {
-    return execFileAsync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', commandPath, ...args], options);
+    return execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], options);
   }
   return execFileAsync(commandPath, args, options);
 }
@@ -38,7 +44,6 @@ const LANG_MAP = {
   'rb': 'ruby',
   'cs': 'csharp',
   'swift': 'swift',
-  'dart': 'dart',
   'c': 'c',
   'h': 'c',
   'cpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp', 'hpp': 'cpp',
@@ -96,11 +101,43 @@ function formatDuration(ms) {
 }
 
 function sanitizeAgentName(agentName) {
-  return String(agentName || 'codex')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'codex';
+  const raw = String(agentName || 'codex').trim().toLowerCase();
+  let normalized = '';
+  let lastWasGeneratedHyphen = false;
+
+  for (const char of raw) {
+    const code = char.charCodeAt(0);
+    const isSafeAscii =
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      char === '_' ||
+      char === '-';
+
+    if (isSafeAscii) {
+      normalized += char;
+      lastWasGeneratedHyphen = false;
+    } else if (normalized && !lastWasGeneratedHyphen) {
+      normalized += '-';
+      lastWasGeneratedHyphen = true;
+    }
+  }
+
+  let start = 0;
+  let end = normalized.length;
+  while (start < end && normalized[start] === '-') start += 1;
+  while (end > start && normalized[end - 1] === '-') end -= 1;
+
+  return normalized.slice(start, end) || 'codex';
+}
+
+function toolErrorMessage(command, err) {
+  if (err?.code === 'ENOENT') {
+    return `${command} not found in PATH`;
+  }
+  if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(err?.message || '')) {
+    return `${command} output exceeded maxBuffer; rerun with a narrower scope or inspect the tool output directly`;
+  }
+  return err?.message || `${command} failed`;
 }
 
 function createSkippedToolResult(reason) {
@@ -431,7 +468,7 @@ async function runSemgrep(rootDir) {
       available: false,
       required: true,
       version: null,
-      error: err.code === 'ENOENT' ? 'semgrep not found in PATH' : err.message,
+      error: toolErrorMessage('semgrep', err),
       findings: [],
       rawCount: 0,
     };
@@ -439,7 +476,8 @@ async function runSemgrep(rootDir) {
 }
 
 async function runNpmAudit(rootDir) {
-  if (!existsSync(resolve(rootDir, 'package.json'))) {
+  const packageJsonPath = safeResolveInside(rootDir, 'package.json');
+  if (!packageJsonPath || !existsSync(packageJsonPath)) {
     return {
       available: false,
       required: false,
@@ -479,7 +517,7 @@ async function runNpmAudit(rootDir) {
       available: false,
       required: false,
       version: null,
-      error: err.code === 'ENOENT' ? 'npm not found in PATH' : err.message,
+      error: toolErrorMessage('npm', err),
       findings: [],
       rawCount: 0,
     };
@@ -516,7 +554,7 @@ async function runOsvScanner(rootDir) {
       available: false,
       required: false,
       version: null,
-      error: err.code === 'ENOENT' ? 'osv-scanner not found in PATH' : err.message,
+      error: toolErrorMessage('osv-scanner', err),
       findings: [],
       rawCount: 0,
     };
@@ -535,12 +573,14 @@ async function checkToolVersion(command, args = ['--version']) {
     return {
       available: false,
       version: null,
-      error: err.code === 'ENOENT' ? `${command} not found in PATH` : err.message,
+      error: toolErrorMessage(command, err),
     };
   }
 }
 
 export async function checkExternalTools(rootDir = process.cwd()) {
+  const packageJsonPath = safeResolveInside(rootDir, 'package.json');
+  const hasPackageJson = Boolean(packageJsonPath && existsSync(packageJsonPath));
   const checks = await Promise.all([
     checkToolVersion('semgrep'),
     checkToolVersion('npm'),
@@ -551,8 +591,8 @@ export async function checkExternalTools(rootDir = process.cwd()) {
     npmAudit: {
       ...checks[1],
       required: false,
-      skipped: !existsSync(resolve(rootDir, 'package.json')),
-      reason: existsSync(resolve(rootDir, 'package.json')) ? null : 'package.json not found at project root',
+      skipped: !hasPackageJson,
+      reason: hasPackageJson ? null : 'package.json not found at project root',
     },
     osvScanner: { ...checks[2], required: false },
   };
@@ -579,8 +619,10 @@ async function runSecurityTools(rootDir, options) {
 
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
-  const absRoot = resolve(rootDir);
-  const outputDir = options.outputDir || resolve(absRoot, 'csreview-reports');
+  const absRoot = normalizeLocalPath(rootDir);
+  const outputDir = options.outputDir
+    ? normalizeLocalPath(options.outputDir)
+    : safeResolveInside(absRoot, 'csreview-reports');
   const agentName = sanitizeAgentName(options.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex');
 
   const projectInfo = await scanProject(absRoot);
@@ -606,11 +648,14 @@ export async function runAnalysis(rootDir, options = {}) {
     mkdirSync(outputDir, { recursive: true });
   }
 
-  const htmlPath = resolve(outputDir, `${agentName}_security-report.html`);
-  const mdPath = resolve(outputDir, `${agentName}_security-findings.md`);
+  const htmlPath = safeResolveInside(outputDir, `${agentName}_security-report.html`);
+  const mdPath = safeResolveInside(outputDir, `${agentName}_security-findings.md`);
+  if (!htmlPath || !mdPath) {
+    throw new Error('Unable to resolve report output paths safely.');
+  }
 
   generateHtmlReport(projectInfo, findings, htmlPath, { toolResults });
-  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults });
+  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults, analysisStartTime: startTime });
 
   const duration = Date.now() - startTime;
 

@@ -1,6 +1,6 @@
 {
   "name": "csreview",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Ultra-deep security audit and pentest analysis for codebases",
   "main": "src/index.js",
   "bin": {
@@ -8,14 +8,14 @@
   },
   "type": "module",
   "engines": {
-    "node": "20 || >=22"
+    "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test test/analysis.test.js",
     "doctor": "node src/cli.js --doctor"
   },
   "keywords": ["security", "audit", "pentest", "code-review"],
-  "author": "",
+  "author": "decksoftware",
   "license": "MIT",
   "files": [
     "src/",

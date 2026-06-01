@@ -11,7 +11,9 @@ import {
   runAnalysis,
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
-import { calculateSecurityScore } from '../src/scoring.js';
+import { generateMarkdownReport } from '../src/reports/markdown.js';
+import { normalizeLocalPath, safeResolveInside } from '../src/pathSafety.js';
+import { calculateSecurityScore } from '../src/score.js';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
@@ -23,6 +25,16 @@ function writeFile(root, relativePath, content) {
   fs.writeFileSync(target, content, 'utf8');
   return target;
 }
+
+test('path helpers normalize local roots and reject traversal targets', () => {
+  const root = makeTempProject();
+
+  assert.equal(normalizeLocalPath(root), path.normalize(root));
+  assert.equal(safeResolveInside(root, 'src/app.js'), path.join(root, 'src', 'app.js'));
+  assert.equal(safeResolveInside(root, '../outside.js'), null);
+  assert.equal(safeResolveInside(root, path.join(root, 'src', 'app.js')), null);
+  assert.equal(safeResolveInside(root, 'C:\\outside.js'), null);
+});
 
 test('detectVulnerabilities reads files relative to the project root', () => {
   const root = makeTempProject();
@@ -80,6 +92,16 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   assert.equal(path.basename(result.reports.markdown), 'codex_security-findings.md');
   assert.ok(fs.existsSync(result.reports.html));
   assert.ok(fs.existsSync(result.reports.markdown));
+
+  const html = fs.readFileSync(result.reports.html, 'utf8');
+  const markdown = fs.readFileSync(result.reports.markdown, 'utf8');
+  assert.match(html, new RegExp(`const reportScore = ${result.score};`));
+  assert.match(markdown, new RegExp(`\\*\\*Security Score\\*\\*: ${result.score}/100`));
+  assert.match(html, /Potential Exploitation Path \(theoretical\)/);
+  assert.match(markdown, /Potential Exploitation Path \(theoretical\)/);
+  assert.match(markdown, /static-analysis hypothesis/i);
+  assert.doesNotMatch(html, /Exploitation Scenario/);
+  assert.doesNotMatch(markdown, /Exploitation Scenario/);
 });
 
 test('runAnalysis scans config and environment files for findings', async () => {
@@ -96,6 +118,17 @@ test('runAnalysis scans config and environment files for findings', async () => 
   assert.ok(result.score < 100);
 });
 
+test('runAnalysis sanitizes agent report names without regex-heavy processing', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'out');
+  const agentName = `---Codex Security!!! 2026---${'!'.repeat(1000)}`;
+
+  const result = await runAnalysis(root, { outputDir, runTools: false, agentName });
+
+  assert.equal(path.basename(result.reports.html), 'codex-security-2026_security-report.html');
+  assert.equal(path.basename(result.reports.markdown), 'codex-security-2026_security-findings.md');
+});
+
 test('shared scoring counts config-only findings against audited files', () => {
   const score = calculateSecurityScore(
     [{ severity: 'CRITICAL', file: '.env' }],
@@ -103,6 +136,15 @@ test('shared scoring counts config-only findings against audited files', () => {
   );
 
   assert.equal(score, 0);
+});
+
+test('shared scoring does not hide critical findings in large projects', () => {
+  const score = calculateSecurityScore(
+    [{ severity: 'CRITICAL', file: 'src/vulnerable.js' }],
+    { files: Array.from({ length: 100 }, (_, index) => `src/file-${index}.js`), configFiles: [], depFiles: [], baasFiles: [] },
+  );
+
+  assert.ok(score <= 49);
 });
 
 test('HTML report safely embeds JSON data and tolerates missing CWE', () => {
@@ -133,6 +175,52 @@ test('HTML report safely embeds JSON data and tolerates missing CWE', () => {
   assert.match(html, /\\u003C\/script/);
 });
 
+test('HTML report safely renders finding attributes', () => {
+  const root = makeTempProject();
+  const outputPath = path.join(root, 'report.html');
+  const attack = 'x" onclick="alert(1)';
+
+  generateHtmlReport(
+    { name: 'demo', files: ['src/app.js'], configFiles: [] },
+    [{
+      id: attack,
+      severity: 'HIGH',
+      category: attack,
+      name: attack,
+      description: attack,
+      file: `src/${attack}.js`,
+      line: 1,
+      vulnerableCode: attack,
+      owasp: 'N/A',
+      fix: 'Review manually.',
+    }],
+    outputPath,
+    {},
+  );
+
+  const html = fs.readFileSync(outputPath, 'utf8');
+  assert.doesNotMatch(html, /id="finding-x" onclick="alert\(1\)"/);
+  assert.doesNotMatch(html, /data-category="x" onclick="alert\(1\)"/);
+  assert.match(html, /x&quot; onclick=&quot;alert\(1\)/);
+});
+
+test('Markdown report uses package version and analysis duration metadata', () => {
+  const root = makeTempProject();
+  const outputPath = path.join(root, 'report.md');
+
+  generateMarkdownReport(
+    { name: 'demo', files: ['src/app.js'], configFiles: [] },
+    [],
+    outputPath,
+    { packageVersion: '0.0.1', durationMs: 2500 },
+  );
+
+  const markdown = fs.readFileSync(outputPath, 'utf8');
+  assert.match(markdown, /\*\*Scanner\*\*: CSReview v0\.0\.1/);
+  assert.match(markdown, /\*\*Duration\*\*: 2\.50s/);
+  assert.doesNotMatch(markdown, /CSReview v2\.0\.0/);
+});
+
 test('detector completes on regex-heavy JavaScript files', () => {
   const root = path.resolve('.');
   const startedAt = Date.now();
@@ -143,6 +231,30 @@ test('detector completes on regex-heavy JavaScript files', () => {
 
   assert.ok(Array.isArray(findings));
   assert.ok(Date.now() - startedAt < 2000);
+});
+
+test('detector avoids common JavaScript false positives', () => {
+  const root = makeTempProject();
+  writeFile(root, 'src/regex.js', 'const match = /abc/g.exec(input);\npattern.regex.exec(line);\n');
+  writeFile(root, 'src/docs.js', 'const example = "pickle.loads(user_input)";\n');
+  writeFile(root, 'src/login.js', 'const passwordField = "password_input";\nconst mockPassword = "test1234";\n');
+  writeFile(root, 'src/unsafe.py', 'pickle.loads(user_input)\n');
+
+  const findings = detectVulnerabilities({
+    root,
+    files: [
+      { path: 'src/regex.js', language: 'javascript' },
+      { path: 'src/docs.js', language: 'javascript' },
+      { path: 'src/login.js', language: 'javascript' },
+      { path: 'src/unsafe.py', language: 'python' },
+    ],
+  });
+
+  assert.ok(findings.some(f => f.file === 'src/unsafe.py' && f.id.startsWith('PY_DESERIALIZE')));
+  assert.ok(findings.every(f => !(f.file === 'src/regex.js' && f.id.startsWith('UNSAFE_EVAL'))));
+  assert.ok(findings.every(f => !(f.file === 'src/regex.js' && f.id.startsWith('COMMAND_INJECTION'))));
+  assert.ok(findings.every(f => !(f.file === 'src/docs.js' && f.id.startsWith('PY_DESERIALIZE'))));
+  assert.ok(findings.every(f => !(f.file === 'src/login.js' && f.id.startsWith('GENERIC_PASSWORD'))));
 });
 
 test('detector skips generic vulnerability checks in minified files but still scans secrets', () => {
@@ -231,7 +343,8 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.equal(skillInstallation.scope, 'global-agent-environment');
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
-  assert.equal(pkg.engines.node, '20 || >=22');
+  assert.equal(pkg.engines.node, '>=18');
+  assert.equal(pkg.author, 'decksoftware');
   assert.match(pkg.dependencies.glob, /^\^13\./);
   assert.equal(semgrep?.required, true);
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
@@ -268,6 +381,30 @@ test('documentation requires global skill installation by default', () => {
   assert.match(docs, /~\/\.trae\/skills\/csreview/);
   assert.match(docs, /MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project/i);
   assert.match(docs, /unless the user explicitly asks for project-local installation/i);
+});
+
+test('skill positions CSReview as local development-time security alignment only', () => {
+  const skill = fs.readFileSync('SKILL.md', 'utf8');
+
+  assert.match(skill, /development-time security alignment for the local workspace/i);
+  assert.match(skill, /penetration tester's adversarial mindset/i);
+  assert.match(skill, /static SAST \+ SCA/i);
+  assert.match(skill, /does NOT perform live penetration testing against running, deployed, or production systems/i);
+  assert.match(skill, /## Scope/);
+  assert.match(skill, /IN SCOPE[\s\S]*local development workspace\/project/i);
+  assert.match(skill, /GOAL[\s\S]*SECURITY and EFFICIENCY/i);
+  assert.match(skill, /OUT OF SCOPE \/ PROHIBITED[\s\S]*DAST against running targets/i);
+  assert.match(skill, /Reference documentation research[\s\S]*ALLOWED/i);
+  assert.doesNotMatch(skill, new RegExp('automated pentest ' + 'level', 'i'));
+});
+
+test('skill describes exploitation paths as theoretical static-analysis hypotheses', () => {
+  const skill = fs.readFileSync('SKILL.md', 'utf8');
+
+  assert.match(skill, /Potential Exploitation Path \(theoretical, unverified\)/);
+  assert.match(skill, /hypothesis derived from static analysis/i);
+  assert.match(skill, /not a validated or executed exploit/i);
+  assert.doesNotMatch(skill, /Exploitation Scenario/);
 });
 
 test('skill requires explicit report path handoff for humans and coding agents', () => {

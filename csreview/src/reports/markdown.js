@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../scoring.js';
+import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
@@ -21,9 +21,16 @@ const OWASP_CATEGORY_MAP = {
   'Sensitive Data Exposure': 'A02:2021',
   'XML External Entities': 'A05:2021',
   'Broken Access Control': 'A01:2021',
+  'Access Control': 'A01:2021',
   'Security Misconfiguration': 'A05:2021',
   'Cross-Site Scripting': 'A03:2021',
   'Insecure Deserialization': 'A08:2021',
+  'Dependency Vulnerability': 'A06:2021',
+  'Supply Chain': 'A08:2021',
+  'Memory Safety': 'A06:2021',
+  'Data Leakage': 'A09:2021',
+  'Cryptography': 'A02:2021',
+  'Authentication': 'A07:2021',
   'Using Components with Known Vulnerabilities': 'A06:2021',
   'Insufficient Logging & Monitoring': 'A09:2021',
   'Server-Side Request Forgery': 'A10:2021',
@@ -32,6 +39,15 @@ const OWASP_CATEGORY_MAP = {
   'Software and Data Integrity Failures': 'A08:2021',
   'Security Logging and Monitoring Failures': 'A09:2021'
 };
+
+function readPackageVersion() {
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+    return packageJson.version || '0.0.1';
+  } catch {
+    return '0.0.1';
+  }
+}
 
 function getLanguageFromExtension(file) {
   const ext = path.extname(file).toLowerCase();
@@ -98,7 +114,7 @@ function getRiskAssessment(findings, score) {
     : 'None';
 
   if (counts.CRITICAL > 0) {
-    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any deployment to production.`;
+    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any release.`;
   }
   if (counts.HIGH > 0) {
     return `The application has a concerning security posture with a score of ${score}/100. ${counts.HIGH} high-severity vulnerabilities were found, with ${topCategory} being the most affected area. These issues should be prioritized in the next sprint cycle to reduce the attack surface.`;
@@ -184,7 +200,7 @@ function buildDetailedFindings(findings) {
     const owaspLink = owaspCode ? `[${owaspCode}](${getOwaspUrl(owaspCode)})` : 'N/A';
     const vibeRiskText = f.vibeRisk ? 'Yes' : 'No';
     const complianceText = f.compliance || 'None specified';
-    const exploitationText = f.exploitation || 'No exploitation scenario provided.';
+    const exploitationText = f.exploitation || 'No potential exploitation path provided.';
     const references = f.references && f.references.length > 0
       ? f.references.map(r => `- ${r}`).join('\n')
       : `- ${getCweUrl(f.cwe)}`;
@@ -216,7 +232,9 @@ ${f.description}
 ${f.vulnerableCode || 'No code snippet available.'}
 \`\`\`
 
-#### Exploitation Scenario
+#### Potential Exploitation Path (theoretical)
+
+Static-analysis hypothesis only; not a validated or executed exploit.
 
 ${exploitationText}
 
@@ -510,7 +528,11 @@ function buildToolMetadata(toolResults) {
 }
 
 function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
-  const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+  const durationMs = Number.isFinite(Number(metadata.durationMs))
+    ? Number(metadata.durationMs)
+    : Date.now() - Number(metadata.analysisStartTime || startTime);
+  const duration = (durationMs / 1000).toFixed(2);
+  const scannerVersion = metadata.packageVersion || readPackageVersion();
   const confidenceBreakdown = { CONFIRMED: 0, 'TOOL-ONLY': 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const f of findings) {
     const c = String(f.confidence || 'MEDIUM').toUpperCase();
@@ -522,7 +544,7 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
 
   return `## Scan Metadata
 
-- **Scanner**: CSReview v2.0.0
+- **Scanner**: CSReview v${scannerVersion}
 - **Files Scanned**: ${filesCount}
 - **Config Files**: ${configCount}
 ${buildToolMetadata(metadata.toolResults)}

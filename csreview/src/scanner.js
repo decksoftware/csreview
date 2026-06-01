@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { glob } from 'glob';
+import { safeResolveInside } from './pathSafety.js';
 
 const SOURCE_EXTENSIONS = [
   'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
@@ -151,6 +152,21 @@ function readFileContent(filePath) {
   }
 }
 
+function readProjectJson(rootDir, relativePath) {
+  const filePath = safeResolveInside(rootDir, relativePath);
+  return filePath ? readFileJson(filePath) : null;
+}
+
+function readProjectLines(rootDir, relativePath) {
+  const filePath = safeResolveInside(rootDir, relativePath);
+  return filePath ? readFileLines(filePath) : [];
+}
+
+function readProjectContent(rootDir, relativePath) {
+  const filePath = safeResolveInside(rootDir, relativePath);
+  return filePath ? readFileContent(filePath) : '';
+}
+
 function detectTechStack(files) {
   const techSet = new Set();
 
@@ -170,7 +186,7 @@ function detectFrameworksFromPackageJson(rootDir, depFiles) {
 
   if (!pkgPath) return frameworks;
 
-  const pkg = readFileJson(path.join(rootDir, pkgPath));
+  const pkg = readProjectJson(rootDir, pkgPath);
   if (!pkg) return frameworks;
 
   const allDeps = {
@@ -202,7 +218,7 @@ function detectFrameworksFromRequirements(rootDir, depFiles) {
 
   if (!reqPath) return frameworks;
 
-  const lines = readFileLines(path.join(rootDir, reqPath));
+  const lines = readProjectLines(rootDir, reqPath);
   const content = lines.join('\n').toLowerCase();
 
   if (content.includes('django')) frameworks.push('Django');
@@ -218,7 +234,7 @@ function detectFrameworksFromPyproject(rootDir, depFiles) {
 
   if (!pyprojectPath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, pyprojectPath)).toLowerCase();
+  const content = readProjectContent(rootDir, pyprojectPath).toLowerCase();
 
   if (content.includes('django')) frameworks.push('Django');
   if (content.includes('flask')) frameworks.push('Flask');
@@ -233,7 +249,7 @@ function detectFrameworksFromComposer(rootDir, depFiles) {
 
   if (!composerPath) return frameworks;
 
-  const composer = readFileJson(path.join(rootDir, composerPath));
+  const composer = readProjectJson(rootDir, composerPath);
   if (!composer) return frameworks;
 
   const allDeps = {
@@ -252,7 +268,7 @@ function detectFrameworksFromGemfile(rootDir, depFiles) {
 
   if (!gemfilePath) return frameworks;
 
-  const lines = readFileLines(path.join(rootDir, gemfilePath));
+  const lines = readProjectLines(rootDir, gemfilePath);
   const content = lines.join('\n').toLowerCase();
 
   if (content.includes("'rails'") || content.includes('"rails"')) frameworks.push('Rails');
@@ -266,7 +282,7 @@ function detectFrameworksFromPomXml(rootDir, depFiles) {
 
   if (!pomPath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, pomPath)).toLowerCase();
+  const content = readProjectContent(rootDir, pomPath).toLowerCase();
 
   if (content.includes('spring-boot') || content.includes('springframework')) frameworks.push('Spring');
 
@@ -282,7 +298,7 @@ function detectFrameworksFromGradle(rootDir, depFiles) {
 
   if (!gradlePath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, gradlePath)).toLowerCase();
+  const content = readProjectContent(rootDir, gradlePath).toLowerCase();
 
   if (content.includes('spring-boot') || content.includes('org.springframework')) frameworks.push('Spring');
 
@@ -295,7 +311,7 @@ function detectFrameworksFromGoMod(rootDir, depFiles) {
 
   if (!goModPath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, goModPath));
+  const content = readProjectContent(rootDir, goModPath);
 
   if (content.includes('gin-gonic/gin')) frameworks.push('Gin');
   if (content.includes('labstack/echo')) frameworks.push('Echo');
@@ -310,7 +326,7 @@ function detectFrameworksFromCsproj(rootDir, depFiles) {
 
   if (!csprojPath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, csprojPath));
+  const content = readProjectContent(rootDir, csprojPath);
 
   if (content.includes('Microsoft.AspNetCore')) frameworks.push('ASP.NET');
 
@@ -323,7 +339,7 @@ function detectFrameworksFromPubspec(rootDir, depFiles) {
 
   if (!pubspecPath) return frameworks;
 
-  const content = readFileContent(path.join(rootDir, pubspecPath)).toLowerCase();
+  const content = readProjectContent(rootDir, pubspecPath).toLowerCase();
 
   if (content.includes('flutter')) frameworks.push('Flutter');
 
@@ -408,7 +424,7 @@ function detectProjectType(frameworks, depFiles, rootDir) {
 
   const pkgPath = depFiles.find(f => path.basename(f) === 'package.json');
   if (pkgPath) {
-    const pkg = readFileJson(path.join(rootDir, pkgPath));
+    const pkg = readProjectJson(rootDir, pkgPath);
     if (pkg) {
       const hasMainOrExports = !!(pkg.main || pkg.exports);
       const scripts = pkg.scripts || {};
@@ -421,8 +437,8 @@ function detectProjectType(frameworks, depFiles, rootDir) {
   return 'unknown';
 }
 
-function detectBaasFiles(rootDir) {
-  const patterns = [
+function getBaasFilePatterns() {
+  return [
     'supabase/config.toml',
     'supabase/migrations/*.sql',
     'supabase/seed.sql',
@@ -443,8 +459,6 @@ function detectBaasFiles(rootDir) {
     'drizzle.config.*',
     'prisma/schema.prisma'
   ];
-
-  return patterns;
 }
 
 export function readFileSafe(filePath) {
@@ -559,7 +573,7 @@ export async function scanProject(rootDir) {
     }
   }
 
-  const baasPatterns = detectBaasFiles(rootDir);
+  const baasPatterns = getBaasFilePatterns();
   const baasFiles = [];
   for (const pattern of baasPatterns) {
     try {
