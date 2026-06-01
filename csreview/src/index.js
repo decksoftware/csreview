@@ -1,7 +1,7 @@
 import { relative } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'fs';
 import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
@@ -178,6 +178,20 @@ function normalizeSeverity(severity) {
 
 const SEVERITY_RANK = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
 const CONFIDENCE_RANK = { CONFIRMED: 5, 'TOOL-ONLY': 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+const PARTIAL_REQUIRED_FIELDS = [
+  'severity',
+  'category',
+  'name',
+  'description',
+  'file',
+  'line',
+  'cwe',
+  'fix',
+  'confidence',
+  'source',
+];
+const PARTIAL_TOOL_FIELDS = ['toolExecutions', 'toolRuns', 'toolsExecuted', 'executedTools'];
+const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'osv-scanner', 'trivy']);
 
 function normalizeKeyPart(value) {
   return String(value || '')
@@ -281,6 +295,178 @@ export function deduplicateFindings(findings = []) {
     if (severityDelta !== 0) return severityDelta;
     return Number(left.line || 0) - Number(right.line || 0);
   });
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeToolName(entry) {
+  const raw = typeof entry === 'string'
+    ? entry
+    : entry?.name || entry?.tool || entry?.command || entry?.id || '';
+  const value = String(raw).trim().toLowerCase();
+  if (!value) return '';
+  if (value === 'npm' || value === 'npm audit' || value.includes('npm audit')) return 'npm audit';
+  if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner')) return 'osv-scanner';
+  if (value.includes('semgrep')) return 'semgrep';
+  if (value.includes('trivy')) return 'trivy';
+  return value.split(/\s+/)[0];
+}
+
+function extractToolExecutions(payload) {
+  const values = [];
+  for (const field of PARTIAL_TOOL_FIELDS) {
+    if (Array.isArray(payload?.[field])) values.push(...payload[field]);
+    if (Array.isArray(payload?.metadata?.[field])) values.push(...payload.metadata[field]);
+  }
+  return values.map(normalizeToolName).filter(Boolean);
+}
+
+function extractPartialFindings(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.findings)) return payload.findings;
+  if (Array.isArray(payload?.partialFindings)) return payload.partialFindings;
+  return null;
+}
+
+function isSubagentSource(value) {
+  return /^subagent:[a-z0-9][a-z0-9_-]*$/i.test(String(value || ''));
+}
+
+function hasSubagentEvidence(finding) {
+  if (isSubagentSource(finding?.source)) return true;
+  return Array.isArray(finding?.sources) && finding.sources.some(isSubagentSource);
+}
+
+function validatePartialFinding(finding, fileName, index) {
+  const errors = [];
+  const location = `${fileName} finding #${index + 1}`;
+  if (!isPlainObject(finding)) {
+    return [`${location} must be an object using the canonical finding schema.`];
+  }
+  for (const field of PARTIAL_REQUIRED_FIELDS) {
+    if (finding[field] === undefined || finding[field] === null || finding[field] === '') {
+      errors.push(`${location} is missing required field "${field}".`);
+    }
+  }
+  if (!Number.isFinite(Number(finding.line)) || Number(finding.line) < 1) {
+    errors.push(`${location} field "line" must be a positive number.`);
+  }
+  if (!isSubagentSource(finding.source)) {
+    errors.push(`${location} must set source: "subagent:<domain>".`);
+  }
+  return errors;
+}
+
+function readSubagentPartials(outputDir) {
+  const result = {
+    status: 'skipped',
+    partialFiles: [],
+    partialFindings: [],
+    toolExecutions: [],
+    errors: [],
+    warnings: [],
+  };
+  const partialsDir = safeResolveInside(outputDir, '.partials');
+  if (!partialsDir || !existsSync(partialsDir)) {
+    return result;
+  }
+  result.status = 'empty';
+  try {
+    if (!statSync(partialsDir).isDirectory()) {
+      result.errors.push('Partial reconciliation failed: .partials exists but is not a directory.');
+      result.status = 'failed';
+      return result;
+    }
+    const fileNames = readdirSync(partialsDir).filter(name => name.toLowerCase().endsWith('.json')).sort();
+    if (fileNames.length === 0) {
+      return result;
+    }
+    result.status = 'found';
+    for (const fileName of fileNames) {
+      if (!/^[a-z0-9][a-z0-9_-]*\.json$/i.test(fileName)) {
+        result.errors.push(`Partial file ${fileName} must match <subagent>.json with letters, numbers, "_" or "-".`);
+        continue;
+      }
+      const partialPath = safeResolveInside(partialsDir, fileName);
+      if (!partialPath) {
+        result.errors.push(`Partial file ${fileName} could not be resolved safely.`);
+        continue;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(readFileSync(partialPath, 'utf8'));
+      } catch (err) {
+        result.errors.push(`Partial file ${fileName} is not valid JSON: ${err.message}`);
+        continue;
+      }
+      result.partialFiles.push(partialPath);
+      result.toolExecutions.push(...extractToolExecutions(payload));
+      const findings = extractPartialFindings(payload);
+      if (!findings) {
+        result.errors.push(`Partial file ${fileName} must contain a findings array.`);
+        continue;
+      }
+      findings.forEach((finding, index) => {
+        const errors = validatePartialFinding(finding, fileName, index);
+        if (errors.length > 0) {
+          result.errors.push(...errors);
+          return;
+        }
+        result.partialFindings.push(finding);
+      });
+    }
+  } catch (err) {
+    result.errors.push(`Partial reconciliation failed while reading .partials: ${err.message}`);
+  }
+  return result;
+}
+
+export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
+  const absOutputDir = normalizeLocalPath(outputDir);
+  const result = {
+    ...readSubagentPartials(absOutputDir),
+    ok: true,
+    partialFindingCount: 0,
+    dedupedPartialFindingCount: 0,
+    finalSubagentFindingCount: 0,
+    duplicateToolExecutions: {},
+  };
+
+  if (result.status === 'skipped' || result.status === 'empty') {
+    return result;
+  }
+
+  const dedupedPartialFindings = deduplicateFindings(result.partialFindings);
+  result.partialFindingCount = result.partialFindings.length;
+  result.dedupedPartialFindingCount = dedupedPartialFindings.length;
+  result.finalSubagentFindingCount = (finalFindings || []).filter(hasSubagentEvidence).length;
+
+  if (result.dedupedPartialFindingCount !== result.finalSubagentFindingCount) {
+    result.errors.push(
+      `Final subagent finding count (${result.finalSubagentFindingCount}) does not match deduplicated partial count (${result.dedupedPartialFindingCount}).`
+    );
+  }
+
+  const toolCounts = new Map();
+  for (const toolName of result.toolExecutions) {
+    if (!WHOLE_TREE_TOOL_NAMES.has(toolName)) continue;
+    toolCounts.set(toolName, (toolCounts.get(toolName) || 0) + 1);
+  }
+  for (const [toolName, count] of toolCounts.entries()) {
+    if (count > 1) {
+      result.duplicateToolExecutions[toolName] = count;
+      result.errors.push(`${toolName} appears executed ${count} times in subagent partial metadata; whole-tree tools must run once in Phase 0/1.`);
+    }
+  }
+
+  result.ok = result.errors.length === 0;
+  result.status = result.ok ? 'ok' : 'failed';
+  if (!result.ok && options.strict) {
+    throw new Error(`Partial reconciliation failed: ${result.errors.join(' ')}`);
+  }
+  return result;
 }
 
 function normalizeSemgrepSeverity(severity) {
@@ -651,12 +837,17 @@ export async function runAnalysis(rootDir, options = {}) {
   };
 
   const toolResults = await runSecurityTools(absRoot, options);
+  const partialScan = readSubagentPartials(outputDir);
   const findings = deduplicateFindings([
     ...detectVulnerabilities(detectorInput),
     ...toolResults.semgrep.findings,
     ...toolResults.npmAudit.findings,
     ...toolResults.osvScanner.findings,
+    ...partialScan.partialFindings,
   ]);
+  const partialReconciliation = reconcilePartials(outputDir, findings, {
+    strict: Boolean(options.strictPartials),
+  });
 
   const score = calculateSecurityScore(findings, projectInfo);
 
@@ -670,8 +861,8 @@ export async function runAnalysis(rootDir, options = {}) {
     throw new Error('Unable to resolve report output paths safely.');
   }
 
-  generateHtmlReport(projectInfo, findings, htmlPath, { toolResults });
-  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults, analysisStartTime: startTime });
+  generateHtmlReport(projectInfo, findings, htmlPath, { toolResults, partialReconciliation });
+  generateMarkdownReport(projectInfo, findings, mdPath, { toolResults, partialReconciliation, analysisStartTime: startTime });
 
   const duration = Date.now() - startTime;
 
@@ -697,6 +888,7 @@ export async function runAnalysis(rootDir, options = {}) {
     techStack: projectInfo.techStack,
     reports: { html: htmlPath, markdown: mdPath },
     toolResults,
+    partialReconciliation,
     duration: formatDuration(duration),
     findings,
   };

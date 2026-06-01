@@ -45,6 +45,7 @@ ${chalk.bold('OPTIONS:')}
   --agent-name <name>   Prefix report files with the coding agent name (default: codex)
   --local-dast-url <url> Run complementary local-only DAST against localhost/127.0.0.1
   --confirm-local-dast  Required confirmation flag for --local-dast-url
+  --strict-partials     Fail when csreview-reports/.partials/ does not reconcile
   --doctor              Check external security tools without scanning source code
   --help, -h            Show this help message
 
@@ -81,6 +82,7 @@ const targetDir = resolve(args[0]);
 let outputDir = null;
 let agentName = process.env.CSREVIEW_AGENT_NAME || 'codex';
 let localDastUrl = null;
+const strictPartials = args.includes('--strict-partials');
 
 const outputIdx = args.findIndex(a => a === '--output' || a === '-o');
 if (outputIdx !== -1 && args[outputIdx + 1]) {
@@ -109,7 +111,7 @@ console.log(chalk.gray(`  Output:  ${outputDir || resolve(targetDir, 'csreview-r
 console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
 
 try {
-  const result = await runAnalysis(targetDir, { outputDir, agentName });
+  const result = await runAnalysis(targetDir, { outputDir, agentName, strictPartials });
 
   console.log(chalk.bold('\n  ----------------------------------------\n'));
   console.log(chalk.bold('  Scan Complete\n'));
@@ -135,6 +137,14 @@ try {
     console.log(`  OSV-Scanner:    ${result.toolResults.osvScanner.version} (${result.toolResults.osvScanner.rawCount} findings)`);
   } else if (result.toolResults?.osvScanner?.error) {
     console.log(`  OSV-Scanner:    recommended but unavailable (${result.toolResults.osvScanner.error})`);
+  }
+
+  if (result.partialReconciliation?.status && !['skipped', 'empty'].includes(result.partialReconciliation.status)) {
+    const reconciliationLabel = result.partialReconciliation.ok ? chalk.green('OK') : chalk.red.bold('FAILED');
+    console.log(`  Partials:       ${reconciliationLabel} (${result.partialReconciliation.partialFindingCount} partial findings)`);
+    for (const error of result.partialReconciliation.errors || []) {
+      console.log(chalk.red(`    - ${error}`));
+    }
   }
 
   console.log(`  Duration:       ${result.duration}\n`);
