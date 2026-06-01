@@ -6,6 +6,7 @@ import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
 import { generateMarkdownReport } from './reports/markdown.js';
+import { calculateSecurityScore } from './scoring.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -88,21 +89,6 @@ function uniqueAuditFiles(projectInfo) {
   ].filter((filePath, index, all) => filePath && all.indexOf(filePath) === index);
 }
 
-function calculateDensityScore(findings, fileCount) {
-  if (!fileCount) return 100;
-  let penalty = 0;
-  for (const f of findings) {
-    if (f.severity === 'CRITICAL') penalty += 20;
-    else if (f.severity === 'HIGH') penalty += 10;
-    else if (f.severity === 'MEDIUM') penalty += 5;
-    else if (f.severity === 'LOW') penalty += 2;
-    else if (f.severity === 'INFO') penalty += 1;
-  }
-  const density = penalty / fileCount;
-  const raw = 100 - (density * 10);
-  return Math.max(0, Math.min(100, Math.round(raw)));
-}
-
 function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -151,6 +137,113 @@ function normalizeSeverity(severity) {
   if (upper === 'MEDIUM' || upper === 'MODERATE') return 'MEDIUM';
   if (upper === 'LOW') return 'LOW';
   return 'INFO';
+}
+
+const SEVERITY_RANK = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
+const CONFIDENCE_RANK = { CONFIRMED: 5, 'TOOL-ONLY': 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+function normalizeKeyPart(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\\/g, '/')
+    .replace(/\s+/g, ' ');
+}
+
+function canonicalCwe(cwe) {
+  const match = String(cwe || '').match(/CWE-\d+/i);
+  return match ? match[0].toUpperCase() : '';
+}
+
+function findingSource(finding) {
+  return finding?.source || 'csreview-detector';
+}
+
+function findingDedupKey(finding) {
+  const file = normalizeKeyPart(finding?.file);
+  const line = Number.isFinite(Number(finding?.line)) ? Number(finding.line) : 1;
+  const cwe = canonicalCwe(finding?.cwe);
+  if (cwe) {
+    return `${file}:${line}:${cwe}`;
+  }
+  return [
+    file,
+    line,
+    normalizeKeyPart(finding?.category),
+    normalizeKeyPart(finding?.name),
+  ].join(':');
+}
+
+function rankSeverity(severity) {
+  return SEVERITY_RANK[normalizeSeverity(severity)] || 0;
+}
+
+function rankConfidence(confidence) {
+  return CONFIDENCE_RANK[String(confidence || '').toUpperCase()] || 0;
+}
+
+function mergeReferences(left = [], right = []) {
+  return [...new Set([
+    ...(Array.isArray(left) ? left : []),
+    ...(Array.isArray(right) ? right : []),
+  ].filter(Boolean))];
+}
+
+function shouldReplaceFinding(current, incoming) {
+  const severityDelta = rankSeverity(incoming?.severity) - rankSeverity(current?.severity);
+  if (severityDelta !== 0) {
+    return severityDelta > 0;
+  }
+  const confidenceDelta = rankConfidence(incoming?.confidence) - rankConfidence(current?.confidence);
+  if (confidenceDelta !== 0) {
+    return confidenceDelta > 0;
+  }
+  return findingSource(incoming) !== 'csreview-detector' && findingSource(current) === 'csreview-detector';
+}
+
+function mergeFindings(current, incoming) {
+  const sources = new Set([
+    ...(current.sources || [findingSource(current)]),
+    ...(incoming.sources || [findingSource(incoming)]),
+  ]);
+  const primary = shouldReplaceFinding(current, incoming) ? incoming : current;
+  const secondary = primary === incoming ? current : incoming;
+  const hasToolAndDetector = sources.has('csreview-detector') && [...sources].some(source => source !== 'csreview-detector');
+
+  return {
+    ...primary,
+    description: primary.description || secondary.description,
+    vulnerableCode: primary.vulnerableCode || secondary.vulnerableCode,
+    fix: primary.fix || secondary.fix,
+    exploitation: primary.exploitation || secondary.exploitation,
+    references: mergeReferences(primary.references, secondary.references),
+    confidence: hasToolAndDetector ? 'CONFIRMED' : primary.confidence,
+    source: primary.source || secondary.source,
+    sources: [...sources].sort(),
+    duplicateCount: (current.duplicateCount || 1) + 1,
+  };
+}
+
+export function deduplicateFindings(findings = []) {
+  const byKey = new Map();
+  for (const finding of findings || []) {
+    if (!finding) continue;
+    const key = findingDedupKey(finding);
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        ...finding,
+        sources: [findingSource(finding)],
+        duplicateCount: 1,
+      });
+      continue;
+    }
+    byKey.set(key, mergeFindings(byKey.get(key), finding));
+  }
+  return [...byKey.values()].sort((left, right) => {
+    const severityDelta = rankSeverity(right.severity) - rankSeverity(left.severity);
+    if (severityDelta !== 0) return severityDelta;
+    return Number(left.line || 0) - Number(right.line || 0);
+  });
 }
 
 function normalizeSemgrepSeverity(severity) {
@@ -500,14 +593,14 @@ export async function runAnalysis(rootDir, options = {}) {
   };
 
   const toolResults = await runSecurityTools(absRoot, options);
-  const findings = [
+  const findings = deduplicateFindings([
     ...detectVulnerabilities(detectorInput),
     ...toolResults.semgrep.findings,
     ...toolResults.npmAudit.findings,
     ...toolResults.osvScanner.findings,
-  ];
+  ]);
 
-  const score = calculateDensityScore(findings, projectInfo.files.length);
+  const score = calculateSecurityScore(findings, projectInfo);
 
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });

@@ -6,7 +6,7 @@
 
 ## Purpose & Utility
 
-**CSReview** is a universal AI agent skill that performs **ultra-deep security audits** (automated pentest level) on codebases across multiple languages, frameworks, and platforms.
+**CSReview** is a universal AI agent skill that performs **ultra-deep security audits** (automated pentest-style analysis) on codebases across multiple languages, frameworks, and platforms.
 
 ### CSReview is READ-ONLY
 
@@ -58,6 +58,8 @@ Every coding agent using CSReview must research externally when it is unsure abo
 - specialized security references such as OWASP, CWE, CVE/NVD, GitHub Security Advisories, OSV.dev, and Snyk
 
 Do not guess. If external sources disagree or the exact version cannot be confirmed, CSReview must mark the finding as lower confidence and explain the uncertainty in the report.
+
+No-findings results are not proof that a system is secure. Reports must state that a clean run only means CSReview and the available external tools did not detect reportable issues in the analyzed scope.
 
 ### Report Handoff
 

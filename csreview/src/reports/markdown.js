@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../scoring.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
-const SEVERITY_WEIGHTS = { CRITICAL: 25, HIGH: 15, MEDIUM: 8, LOW: 3, INFO: 0 };
 
 const EXTENSION_LANGUAGE_MAP = {
   '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript',
@@ -38,10 +38,6 @@ function getLanguageFromExtension(file) {
   return EXTENSION_LANGUAGE_MAP[ext] || 'text';
 }
 
-function getSeverityWeight(severity) {
-  return SEVERITY_WEIGHTS[severity] || 0;
-}
-
 function getCweUrl(cwe) {
   if (!cwe) return '';
   const match = String(cwe).match(/CWE-(\d+)/i);
@@ -69,15 +65,6 @@ function getOwaspUrl(owasp) {
     if (num >= 1 && num <= 10) return `https://owasp.org/Top10/${names[num - 1]}/`;
   }
   return `https://owasp.org/Top10/`;
-}
-
-function calculateScore(findings) {
-  if (!findings || findings.length === 0) return 100;
-  const totalWeight = findings.reduce((sum, f) => sum + getSeverityWeight(f.severity), 0);
-  const fileCount = new Set(findings.map(f => f.file)).size;
-  const density = fileCount > 0 ? totalWeight / fileCount : 0;
-  const rawScore = Math.max(0, 100 - density * 5);
-  return Math.round(Math.min(100, rawScore));
 }
 
 function sortBySeverity(findings) {
@@ -122,7 +109,7 @@ function getRiskAssessment(findings, score) {
   if (counts.LOW > 0 || counts.INFO > 0) {
     return `The application has a good security posture with a score of ${score}/100. Only low-severity and informational findings were detected. Consider addressing these during regular maintenance cycles.`;
   }
-  return `No security findings were identified. The application has a perfect security score of ${score}/100.`;
+  return `No security findings were identified by this run. The score is ${score}/100, but this does not prove the application is secure; it means CSReview and the available external tools did not detect reportable issues in the analyzed scope.`;
 }
 
 function getTopPriorityFixes(findings, limit = 5) {
@@ -524,9 +511,9 @@ function buildToolMetadata(toolResults) {
 
 function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-  const confidenceBreakdown = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+  const confidenceBreakdown = { CONFIRMED: 0, 'TOOL-ONLY': 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
   for (const f of findings) {
-    const c = f.confidence || 'MEDIUM';
+    const c = String(f.confidence || 'MEDIUM').toUpperCase();
     if (confidenceBreakdown[c] !== undefined) confidenceBreakdown[c]++;
   }
 
@@ -539,7 +526,7 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
 - **Files Scanned**: ${filesCount}
 - **Config Files**: ${configCount}
 ${buildToolMetadata(metadata.toolResults)}
-- **Confidence Breakdown**: ${confidenceBreakdown.HIGH} HIGH, ${confidenceBreakdown.MEDIUM} MEDIUM, ${confidenceBreakdown.LOW} LOW
+- **Confidence Breakdown**: ${confidenceBreakdown.CONFIRMED} CONFIRMED, ${confidenceBreakdown['TOOL-ONLY']} TOOL-ONLY, ${confidenceBreakdown.HIGH} HIGH, ${confidenceBreakdown.MEDIUM} MEDIUM, ${confidenceBreakdown.LOW} LOW
 - **Duration**: ${duration}s`;
 }
 
@@ -548,7 +535,7 @@ export function generateMarkdownReport(projectInfo, findings, outputPath, metada
 
   const startTime = Date.now();
   const safeFindings = Array.isArray(findings) ? findings : [];
-  const score = calculateScore(safeFindings);
+  const score = calculateSecurityScore(safeFindings, projectInfo);
 
   const sections = [
     buildHeader(projectInfo, score, safeFindings),

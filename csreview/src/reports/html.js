@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { calculateSecurityScore } from '../scoring.js';
 
 const SEVERITY_COLORS = {
   CRITICAL: '#dc2626',
@@ -38,15 +39,6 @@ function renderCweMeta(cwe) {
     return `<span class="meta-value">${escapeHtml(normalized)}</span>`;
   }
   return `<span class="meta-value"><a href="https://cwe.mitre.org/data/definitions/${escapeHtml(cweId)}.html" target="_blank" rel="noopener noreferrer">${escapeHtml(normalized)}</a></span>`;
-}
-
-function calculateScore(findings) {
-  const weights = { CRITICAL: 25, HIGH: 15, MEDIUM: 8, LOW: 3, INFO: 0 };
-  const totalWeight = findings.reduce((sum, f) => sum + (weights[f.severity] || 0), 0);
-  const fileCount = new Set(findings.map(f => f.file)).size;
-  const density = fileCount > 0 ? totalWeight / fileCount : 0;
-  const rawScore = Math.max(0, 100 - density * 5);
-  return Math.round(Math.min(100, rawScore));
 }
 
 function getSeverityColor(severity) {
@@ -173,7 +165,7 @@ function buildFileData(findings) {
 }
 
 export function generateHtmlReport(projectInfo, findings, outputPath, metadata = {}) {
-  const score = calculateScore(findings);
+  const score = calculateSecurityScore(findings, projectInfo);
   const scoreColor = getScoreColor(score);
   const scoreLabel = getScoreLabel(score);
   const counts = {};
@@ -194,6 +186,9 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const semgrep = metadata.toolResults?.semgrep || {};
   const npmAudit = metadata.toolResults?.npmAudit || {};
   const osvScanner = metadata.toolResults?.osvScanner || {};
+  const assuranceNote = totalFindings === 0
+    ? '<p><strong>Assurance note:</strong> No findings were identified by this run. This does not prove the application is secure; it means CSReview and the available external tools did not detect reportable issues in the analyzed scope.</p>'
+    : '';
   const semgrepText = semgrep.available
     ? `Semgrep ${escapeHtml(semgrep.version || '')} (${semgrep.rawCount || semgrep.findings?.length || 0} findings)`
     : `Semgrep unavailable${semgrep.error ? `: ${escapeHtml(semgrep.error)}` : ''}. Install with pipx install semgrep, uv tool install semgrep, or brew install semgrep.`;
@@ -1293,6 +1288,7 @@ a:hover {
         <div class="score-details">
           <h2>Security Score</h2>
           <p>Assessment for <strong>${escapeHtml(projectInfo.name)}</strong> generated on ${now}. This score considers finding severity weighted against project file density for a fair evaluation.</p>
+          ${assuranceNote}
           <div class="score-metrics">
             <div class="score-metric">
               <div class="score-metric-value">${totalFindings}</div>
@@ -1402,6 +1398,7 @@ a:hover {
 <script>
 const projectData = ${safeJsonForScript(projectInfo)};
 const findingsData = ${safeJsonForScript(findings)};
+const reportScore = ${score};
 
 function toggleFinding(header) {
   const card = header.closest('.finding-card');
@@ -1465,13 +1462,7 @@ function exportJSON() {
   const data = {
     projectInfo: projectData,
     findings: findingsData,
-    score: findingsData.length > 0 ? (() => {
-      const weights = { CRITICAL: 25, HIGH: 15, MEDIUM: 8, LOW: 3, INFO: 0 };
-      const tw = findingsData.reduce((s, f) => s + (weights[f.severity] || 0), 0);
-      const fc = new Set(findingsData.map(f => f.file)).size;
-      const d = fc > 0 ? tw / fc : 0;
-      return Math.round(Math.min(100, Math.max(0, 100 - d * 5)));
-    })() : 100,
+    score: reportScore,
     generatedAt: new Date().toISOString()
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

@@ -5,11 +5,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { detectSecrets, detectVulnerabilities } from '../src/detector.js';
 import {
+  deduplicateFindings,
   normalizeNpmAuditFindings,
   normalizeOsvScannerFindings,
   runAnalysis,
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
+import { calculateSecurityScore } from '../src/scoring.js';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
@@ -91,6 +93,16 @@ test('runAnalysis scans config and environment files for findings', async () => 
 
   assert.ok(envFinding);
   assert.doesNotMatch(envFinding.vulnerableCode, new RegExp(rawSecret));
+  assert.ok(result.score < 100);
+});
+
+test('shared scoring counts config-only findings against audited files', () => {
+  const score = calculateSecurityScore(
+    [{ severity: 'CRITICAL', file: '.env' }],
+    { files: [], configFiles: ['.env'], depFiles: [], baasFiles: [] },
+  );
+
+  assert.equal(score, 0);
 });
 
 test('HTML report safely embeds JSON data and tolerates missing CWE', () => {
@@ -149,6 +161,65 @@ test('detector skips generic vulnerability checks in minified files but still sc
   assert.ok(findings.every(f => !String(f.vulnerableCode).includes(secret)));
 });
 
+test('generic vulnerability evidence is only redacted for secret-like patterns', () => {
+  const root = makeTempProject();
+  const rawSecret = 'supersecretvalue123456';
+  writeFile(root, 'src/auth.js', `const jwt_secret = "${rawSecret}";\n`);
+  writeFile(root, 'src/sql.js', 'db.query("SELECT * FROM users WHERE id = " + req.params.id);\n');
+
+  const findings = detectVulnerabilities({
+    root,
+    files: [
+      { path: 'src/auth.js', language: 'javascript' },
+      { path: 'src/sql.js', language: 'javascript' },
+    ],
+  });
+  const secretFinding = findings.find(f => f.id.startsWith('HARDCODED_SECRET'));
+  const sqlFinding = findings.find(f => f.id.startsWith('SQL_INJECTION'));
+
+  assert.ok(secretFinding);
+  assert.match(secretFinding.vulnerableCode, /\[REDACTED/);
+  assert.doesNotMatch(secretFinding.vulnerableCode, new RegExp(rawSecret));
+  assert.ok(sqlFinding);
+  assert.match(sqlFinding.vulnerableCode, /req\.params\.id/);
+  assert.doesNotMatch(sqlFinding.vulnerableCode, /\[REDACTED/);
+});
+
+test('deduplicateFindings merges detector and tool findings into confirmed evidence', () => {
+  const findings = deduplicateFindings([
+    {
+      id: 'SQL_INJECTION_1',
+      severity: 'CRITICAL',
+      category: 'Injection',
+      name: 'SQL Injection',
+      file: 'src/app.js',
+      line: 10,
+      cwe: 'CWE-89',
+      confidence: 'HIGH',
+      references: ['https://example.test/detector'],
+    },
+    {
+      id: 'SEMGREP_1',
+      severity: 'HIGH',
+      category: 'Semgrep',
+      name: 'Semgrep SQL Injection',
+      file: 'src/app.js',
+      line: 10,
+      cwe: 'CWE-89',
+      confidence: 'TOOL-ONLY',
+      references: ['https://example.test/semgrep'],
+      source: 'semgrep',
+    },
+  ]);
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].severity, 'CRITICAL');
+  assert.equal(findings[0].confidence, 'CONFIRMED');
+  assert.deepEqual(findings[0].sources, ['csreview-detector', 'semgrep']);
+  assert.equal(findings[0].duplicateCount, 2);
+  assert.equal(findings[0].references.length, 2);
+});
+
 test('package metadata declares Semgrep as a required external tool', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const skillInstallation = pkg.csreview?.skillInstallation || {};
@@ -160,6 +231,8 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.equal(skillInstallation.scope, 'global-agent-environment');
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
+  assert.equal(pkg.engines.node, '20 || >=22');
+  assert.match(pkg.dependencies.glob, /^\^13\./);
   assert.equal(semgrep?.required, true);
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
   assert.equal(semgrep.verify, 'semgrep --version');
@@ -182,6 +255,7 @@ test('documentation aligns report handoff names and avoids exact patch instructi
   assert.doesNotMatch(docs, /@csreview review security-findings\.md/i);
   assert.doesNotMatch(docs, /Native skill via `\.trae\/skills\/csreview\/SKILL\.md`/i);
   assert.doesNotMatch(docs, /Compatible via AGENTS\.md or project instructions/i);
+  assert.doesNotMatch(docs, /perfect security score/i);
   assert.match(docs, /@csreview review csreview-reports\/codex_security-findings\.md/);
 });
 

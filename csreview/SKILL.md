@@ -7,7 +7,7 @@ description: "Ultra-deep security audit and pentest analysis for codebases. Gene
 
 ## Overview
 
-This skill performs ultra-deep security analysis (automated pentest level) on codebases across multiple languages, frameworks, and platforms. It identifies vulnerabilities, data leakage risks, misconfigurations, and security flaws, then generates:
+This skill performs ultra-deep security analysis (automated pentest-style analysis) on codebases across multiple languages, frameworks, and platforms. It identifies vulnerabilities, data leakage risks, misconfigurations, and security flaws, then generates:
 
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
 2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
@@ -28,6 +28,8 @@ This skill performs ultra-deep security analysis (automated pentest level) on co
 - Official package, API, or SDK documentation for the exact version or major version in use
 
 When external research is used, include source names and URLs in the finding references. Prefer official documentation and vendor advisories over generic blog posts. If sources disagree or the version cannot be confirmed, mark the finding as lower confidence and explain the uncertainty in the report.
+
+**No-Findings Assurance Limit**: A report with zero findings is not proof that the system is secure. It only means CSReview and the available external tools did not detect reportable issues in the analyzed scope. The HTML and Markdown reports MUST state this limitation when no findings are found.
 
 **Report Handoff Protocol**: After every CSReview run, the agent MUST present two explicit paths:
 
