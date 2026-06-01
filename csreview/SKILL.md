@@ -14,6 +14,8 @@ This skill performs ultra-deep security analysis (automated pentest level) on co
 
 **CSReview is READ-ONLY**: It never modifies, deletes, moves, or creates source code in the analyzed project. It only identifies problems, locates them precisely, and suggests remediation approaches based on the frameworks and technologies in use. The actual fixes are applied later by the human developer or a coding agent after understanding the project context, schema, tests, and regression risk. When encountering unfamiliar frameworks, CSReview researches official documentation and community forums to provide accurate recommendations.
 
+**Global Skill Installation Policy**: CSReview is a global agent skill. It MUST be installed and loaded from the agent's global skills/instructions environment, such as `~/.codex/skills/csreview`, `~/.agents/skills/csreview`, `~/.trae/skills/csreview`, or `~/.claude/skills/csreview`. The agent MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project being audited, including `<project>/.trae/skills/csreview`, `<project>/.codex/skills/csreview`, `<project>/.agents/skills/csreview`, `<project>/.claude/skills/csreview`, `<project>/AGENTS.md`, `<project>/CLAUDE.md`, `.cursorrules`, or `.windsurfrules`, unless the user explicitly asks for project-local installation. Generated reports may be written to the selected output directory, but those reports are audit artifacts, not a skill installation.
+
 **Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. Semgrep is a required external CLI tool, not a normal bundled npm dependency; install it with `pipx install semgrep`, `uv tool install semgrep`, Homebrew, Docker, or the platform package manager. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions.
 
 **Dependency SCA complements Semgrep**: when available, CSReview MUST also run read-only dependency scanners such as `npm audit --json` for Node.js projects and `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL should be executed when relevant to the detected stack.
@@ -94,16 +96,16 @@ This skill is designed to work across multiple AI coding agents:
 
 | Agent | Integration Method |
 |-------|-------------------|
-| **Trae / SOLO** | Native skill via `.trae/skills/csreview/SKILL.md` |
-| **OpenCode** | Compatible via project instructions |
+| **Trae / SOLO** | Global skill via `~/.trae/skills/csreview/SKILL.md` |
+| **OpenCode** | Compatible via global agent instructions |
 | **Qwen CLI** | Compatible via system prompt injection |
-| **Codex** | Compatible via AGENTS.md or project instructions |
-| **Claude Code** | Compatible via CLAUDE.md or project instructions |
-| **Antigravity** | Compatible via project configuration |
+| **Codex** | Global skill via `~/.codex/skills/csreview/SKILL.md` or `~/.agents/skills/csreview/SKILL.md` |
+| **Claude Code** | Global skill via `~/.claude/skills/csreview/SKILL.md` |
+| **Antigravity** | Compatible via global agent configuration |
 | **Qoder** | Compatible via agent configuration |
-| **Cursor / Windsurf / Cline** | Compatible via `.cursorrules` or `.windsurfrules` |
-| **GitHub Copilot CLI** | Compatible via `.github/copilot-instructions.md` |
-| **Aider / Continue / DevChat** | Compatible via project conventions file |
+| **Cursor / Windsurf / Cline** | Compatible via global rules/instructions when supported |
+| **GitHub Copilot CLI** | Compatible via global/custom instructions when supported |
+| **Aider / Continue / DevChat** | Compatible via global agent conventions when supported |
 
 **Cross-Agent Behavior**: Regardless of which agent invokes this skill, the analysis depth, report format, and vulnerability detection remain consistent. The HTML report is always generated in the user's language; the MD report is always in English for agent consumption.
 
@@ -1177,7 +1179,7 @@ Each finding includes a "Vibe Risk" score indicating how likely it was introduce
 
 ### Phase 8: Report Generation
 
-Generate TWO reports in the project root:
+Generate TWO reports under the selected output directory, normally `<project>/csreview-reports/`. Report files are allowed audit artifacts; they do not mean the CSReview skill was installed inside the project:
 
 ---
 
@@ -1751,28 +1753,30 @@ When CSReview is invoked, it can operate in any of these modes:
 
 When invoked, follow these steps:
 
-1. **Announce the scan**: Inform user about starting security analysis
-2. **Phase 0 - Tool Detection**: Attempt Semgrep first (`semgrep --version`, then `semgrep --config auto --json --quiet <project_path>`). Then attempt read-only dependency scanners (`npm audit --json` for Node.js and `osv-scanner scan --format json <project_path>` when installed). Detect installed framework/security tools (bandit, trivy, snyk, gosec, eslint, codeql, pip-audit, etc.). Report which tools are available and which are missing. Run all available relevant tools against the project. Normalize tool output into unified findings format.
-3. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
-4. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws)
-5. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, Firebase cost/performance, and configurations
-6. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
-7. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
-8. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
-9. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
-10. **Progress updates**: Keep user informed of analysis progress throughout
-11. **Phase 8 - Report Generation**: Create BOTH reports:
+1. **Confirm global skill scope**: If the task involves installing or updating CSReview itself, use the agent's global skills directory by default. Do not install CSReview into the analyzed project unless the user explicitly requested project-local installation.
+2. **Announce the scan**: Inform user about starting security analysis
+3. **Phase 0 - Tool Detection**: Attempt Semgrep first (`semgrep --version`, then `semgrep --config auto --json --quiet <project_path>`). Then attempt read-only dependency scanners (`npm audit --json` for Node.js and `osv-scanner scan --format json <project_path>` when installed). Detect installed framework/security tools (bandit, trivy, snyk, gosec, eslint, codeql, pip-audit, etc.). Report which tools are available and which are missing. Run all available relevant tools against the project. Normalize tool output into unified findings format.
+4. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
+5. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws)
+6. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, Firebase cost/performance, and configurations
+7. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
+8. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
+9. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
+10. **Phase 7 - Vibe Coding**: Detect AI-generated code vulnerability patterns and risk scoring
+11. **Progress updates**: Keep user informed of analysis progress throughout
+12. **Phase 8 - Report Generation**: Create BOTH reports:
     - `csreview-reports/<agent>_security-report.html` (visual report in user's language for human review)
     - `csreview-reports/<agent>_security-findings.md` (structured report in English for human/coding-agent remediation planning)
-12. **Deliver reports**: Provide absolute paths to both generated files:
+13. **Deliver reports**: Provide absolute paths to both generated files:
     - HTML report path for the user to click/open in a browser
     - Markdown report path for the coding agent to analyze before remediation
-13. **Summary**: Give brief verbal summary of critical/high findings including tool-detected vs AI-estimated findings, compliance gaps, vibe coding risks, and Firebase cost issues
-14. **Offer next step**: Ask whether the user wants a prioritized remediation plan or wants a separate coding agent session to apply selected fixes with project-context validation.
+14. **Summary**: Give brief verbal summary of critical/high findings including tool-detected vs AI-estimated findings, compliance gaps, vibe coding risks, and Firebase cost issues
+15. **Offer next step**: Ask whether the user wants a prioritized remediation plan or wants a separate coding agent session to apply selected fixes with project-context validation.
 
 ## Important Guidelines
 
 - **READ-ONLY**: CSReview NEVER modifies, deletes, moves, or creates source code in the analyzed project. It only identifies, reports, and suggests remediation approaches.
+- **Global Installation Default**: CSReview MUST be installed in the agent's global skill/instruction environment by default. Do not place CSReview skill files in the analyzed project unless the user explicitly requested project-local installation.
 - **Tool Detection First**: ALWAYS run Phase 0 (tool detection) before any analysis. The user must know which mode is active.
 - **Agent-Only Risk Disclosure**: When operating in Agent-Only mode, the agent MUST explicitly warn the user that findings have lower confidence and that real security tools should be installed for production audits. A less knowledgeable agent may miss critical vulnerabilities or produce incorrect recommendations.
 - **Semgrep Required Baseline**: Always attempt to run `semgrep` (universal) and the language-specific primary tool for the project being analyzed. If Semgrep is missing, mark the run lower-confidence and provide installation commands.

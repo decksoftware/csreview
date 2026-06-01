@@ -151,11 +151,15 @@ test('detector skips generic vulnerability checks in minified files but still sc
 
 test('package metadata declares Semgrep as a required external tool', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const skillInstallation = pkg.csreview?.skillInstallation || {};
   const requiredTools = pkg.csreview?.requiredExternalTools || [];
   const recommendedTools = pkg.csreview?.recommendedExternalTools || [];
   const semgrep = requiredTools.find(tool => tool.name === 'semgrep');
   const osvScanner = recommendedTools.find(tool => tool.name === 'osv-scanner');
 
+  assert.equal(skillInstallation.scope, 'global-agent-environment');
+  assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
+  assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
   assert.equal(semgrep?.required, true);
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
   assert.equal(semgrep.verify, 'semgrep --version');
@@ -176,7 +180,20 @@ test('documentation aligns report handoff names and avoids exact patch instructi
 
   assert.doesNotMatch(docs, /Apply the corrected code exactly as shown/i);
   assert.doesNotMatch(docs, /@csreview review security-findings\.md/i);
+  assert.doesNotMatch(docs, /Native skill via `\.trae\/skills\/csreview\/SKILL\.md`/i);
+  assert.doesNotMatch(docs, /Compatible via AGENTS\.md or project instructions/i);
   assert.match(docs, /@csreview review csreview-reports\/codex_security-findings\.md/);
+});
+
+test('documentation requires global skill installation by default', () => {
+  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+
+  assert.match(docs, /Global Skill Installation/);
+  assert.match(docs, /global agent skill/i);
+  assert.match(docs, /~\/\.codex\/skills\/csreview/);
+  assert.match(docs, /~\/\.trae\/skills\/csreview/);
+  assert.match(docs, /MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project/i);
+  assert.match(docs, /unless the user explicitly asks for project-local installation/i);
 });
 
 test('skill requires explicit report path handoff for humans and coding agents', () => {

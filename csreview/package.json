@@ -25,6 +25,16 @@
     "glob": "^11.0.0"
   },
   "csreview": {
+    "skillInstallation": {
+      "scope": "global-agent-environment",
+      "projectInstallPolicy": "never install inside the analyzed project unless the user explicitly requests project-local installation",
+      "globalSkillDirectories": [
+        "~/.codex/skills/csreview",
+        "~/.agents/skills/csreview",
+        "~/.trae/skills/csreview",
+        "~/.claude/skills/csreview"
+      ]
+    },
     "requiredExternalTools": [
       {
         "name": "semgrep",

@@ -31,3 +31,9 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# Local/global agent skill folders accidentally created inside a project
+.trae/
+.codex/
+.agents/
+.claude/

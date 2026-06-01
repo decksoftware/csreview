@@ -20,6 +20,18 @@ The actual fixes are applied by the human developer or the coding agent, not by 
 
 CSReview exists to slow down unsafe "vibe coding" before production: it inspects code, dependency manifests, framework configuration, database/BaaS rules, frontend/backend boundaries, and platform-specific surfaces, then writes a detailed report explaining what is exposed and why. It does not assume enough business or schema context to change the audited system itself.
 
+### Global Skill Installation Only
+
+CSReview is a **global agent skill**. Install it in the AI agent's global skills directory, never inside the project being audited unless the user explicitly asks for a project-local installation.
+
+Examples of global skill directories:
+
+- Codex: `~/.codex/skills/csreview` or `~/.agents/skills/csreview`
+- Trae / SOLO: `~/.trae/skills/csreview`
+- Claude Code: `~/.claude/skills/csreview`
+
+Do not create project-local agent folders or instruction files such as `<project>/.trae/skills/csreview`, `<project>/.codex/skills/csreview`, `<project>/AGENTS.md`, `<project>/CLAUDE.md`, `.cursorrules`, or `.windsurfrules` solely to install CSReview. Those are allowed only when the user deliberately chooses project-scoped installation. The audited project should contain its own source code plus generated report artifacts such as `csreview-reports/<agent>_security-report.html`, which are ignored by Git.
+
 ### Semgrep is Mandatory for Agent Analysis
 
 Every CSReview run must attempt to call **Semgrep** as the baseline SAST layer:
@@ -198,16 +210,16 @@ CSReview includes a complete code review system - no additional skills or plugin
 
 | Agent | Integration Method |
 |-------|-------------------|
-| **Trae / SOLO** | Native skill via `.trae/skills/csreview/SKILL.md` |
-| **OpenCode** | Compatible via project instructions |
+| **Trae / SOLO** | Global skill via `~/.trae/skills/csreview/SKILL.md` |
+| **OpenCode** | Compatible via global agent instructions |
 | **Qwen CLI** | Compatible via system prompt injection |
-| **Codex** | Compatible via AGENTS.md or project instructions |
-| **Claude Code** | Compatible via CLAUDE.md or project instructions |
-| **Antigravity** | Compatible via project configuration |
+| **Codex** | Global skill via `~/.codex/skills/csreview/SKILL.md` or `~/.agents/skills/csreview/SKILL.md` |
+| **Claude Code** | Global skill via `~/.claude/skills/csreview/SKILL.md` |
+| **Antigravity** | Compatible via global agent configuration |
 | **Qoder** | Compatible via agent configuration |
-| **Cursor / Windsurf / Cline** | Compatible via `.cursorrules` or `.windsurfrules` |
-| **GitHub Copilot CLI** | Compatible via `.github/copilot-instructions.md` |
-| **Aider / Continue / DevChat** | Compatible via project conventions file |
+| **Cursor / Windsurf / Cline** | Compatible via global rules/instructions when supported |
+| **GitHub Copilot CLI** | Compatible via global/custom instructions when supported |
+| **Aider / Continue / DevChat** | Compatible via global agent conventions when supported |
 
 ### Output Reports
 
@@ -243,22 +255,43 @@ CSReview includes a complete code review system - no additional skills or plugin
 
 ### For AI Agents
 
-1. Clone this repository:
+Install CSReview from outside the project you want to audit. Do not clone or copy the skill into the target project's `.trae`, `.codex`, `.agents`, `.claude`, or instruction-file locations unless the user explicitly requested local project installation.
+
+1. Clone this repository into a tools/downloads location:
 ```bash
 git clone https://github.com/decksoftware/csreview.git
+cd csreview
 ```
 
-2. Copy the skill to your agent's skills directory:
+2. Copy the skill to your agent's global skills directory:
 ```bash
-# For Trae/SOLO
-cp -r csreview/csreview ~/.trae/skills/csreview
+# Codex
+mkdir -p ~/.codex/skills/csreview
+cp -R csreview/. ~/.codex/skills/csreview/
 
-# For Claude Code - add to CLAUDE.md or copy to skills directory
+# Codex alternate global skill root
+mkdir -p ~/.agents/skills/csreview
+cp -R csreview/. ~/.agents/skills/csreview/
 
-# For other agents - check their skill/plugin documentation
+# Trae / SOLO
+mkdir -p ~/.trae/skills/csreview
+cp -R csreview/. ~/.trae/skills/csreview/
+
+# Claude Code
+mkdir -p ~/.claude/skills/csreview
+cp -R csreview/. ~/.claude/skills/csreview/
 ```
 
-3. The skill will be automatically detected and can be invoked with:
+PowerShell example:
+```powershell
+git clone https://github.com/decksoftware/csreview.git
+Set-Location .\csreview
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.codex\skills" | Out-Null
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.codex\skills\csreview" | Out-Null
+Copy-Item -Recurse -Force .\csreview\* "$env:USERPROFILE\.codex\skills\csreview"
+```
+
+3. The globally installed skill will be automatically detected and can be invoked with:
    - `@csreview`
    - "Run a security review on this project"
    - "Check for vulnerabilities"
