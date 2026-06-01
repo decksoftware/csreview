@@ -12,6 +12,7 @@ import {
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
 import { generateMarkdownReport } from '../src/reports/markdown.js';
+import { normalizeLocalPath, safeResolveInside } from '../src/pathSafety.js';
 import { calculateSecurityScore } from '../src/score.js';
 
 function makeTempProject() {
@@ -24,6 +25,16 @@ function writeFile(root, relativePath, content) {
   fs.writeFileSync(target, content, 'utf8');
   return target;
 }
+
+test('path helpers normalize local roots and reject traversal targets', () => {
+  const root = makeTempProject();
+
+  assert.equal(normalizeLocalPath(root), path.normalize(root));
+  assert.equal(safeResolveInside(root, 'src/app.js'), path.join(root, 'src', 'app.js'));
+  assert.equal(safeResolveInside(root, '../outside.js'), null);
+  assert.equal(safeResolveInside(root, path.join(root, 'src', 'app.js')), null);
+  assert.equal(safeResolveInside(root, 'C:\\outside.js'), null);
+});
 
 test('detectVulnerabilities reads files relative to the project root', () => {
   const root = makeTempProject();
