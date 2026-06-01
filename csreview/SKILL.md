@@ -7,7 +7,14 @@ description: "Ultra-deep security audit and pentest analysis for codebases. Gene
 
 ## Overview
 
-This skill performs ultra-deep security analysis (automated pentest-style analysis) on codebases across multiple languages, frameworks, and platforms. It identifies vulnerabilities, data leakage risks, misconfigurations, and security flaws, then generates:
+This skill performs development-time security alignment for the local workspace a developer is actively building. It applies a penetration tester's adversarial mindset to the project's local source, configuration, dependencies, and infrastructure files (static SAST + SCA). It does NOT perform live penetration testing against running, deployed, or production systems. It identifies vulnerabilities, data leakage risks, misconfigurations, and security flaws, then generates:
+
+## Scope
+
+- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only.
+- **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
+- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, or production systems; external service endpoints used by the app; DAST against running targets; modifying audited code; exfiltrating data.
+- **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
 2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
@@ -51,7 +58,7 @@ CSReview includes built-in **Code Review** capabilities (equivalent to codex:rev
 - User asks for vulnerability scan or pentest analysis
 - User wants to check for data leakage or exposed secrets
 - User mentions SQL injection, XSS, auth flaws, or security concerns
-- Before production deployment for security validation
+- Before release or deployment preparation, while reviewing only the local workspace
 - User asks to review Supabase, Firebase, Appwrite, Neon, or similar backend security
 - User invokes `@csreview` or mentions CSReview
 - User wants compliance verification (LGPD, GDPR, SOC 2, HIPAA)
@@ -1214,8 +1221,8 @@ For each vulnerability found:
 │ Vulnerable Code:                                │
 │ [syntax-highlighted code snippet]               │
 │                                                 │
-│ Exploitation Scenario:                          │
-│ Step-by-step how an attacker could exploit      │
+│ Potential Exploitation Path (theoretical, unverified): │
+│ Static-analysis hypothesis; not a validated or executed exploit. │
 │                                                 │
 │ Impact:                                         │
 │ What could happen if exploited                  │
@@ -1299,8 +1306,8 @@ For each vulnerability found:
           <p>...</p>
           <h3>Vulnerable Code</h3>
           <pre><code class="language-typescript">...</code></pre>
-          <h3>Exploitation Scenario</h3>
-          <p>...</p>
+          <h3>Potential Exploitation Path (theoretical, unverified)</h3>
+          <p>Static-analysis hypothesis only; not a validated or executed exploit.</p>
           <h3>Impact</h3>
           <p>...</p>
           <h3>Recommended Fix</h3>
@@ -1419,7 +1426,9 @@ const query = `SELECT * FROM users WHERE email = '${email}' AND password = '${pa
 const result = await db.query(query);
 ```
 
-#### Exploitation Scenario
+#### Potential Exploitation Path (theoretical, unverified)
+This is a hypothesis derived from static analysis, not a validated or executed exploit.
+
 1. Attacker submits email: `' OR '1'='1`
 2. Query becomes: `SELECT * FROM users WHERE email = '' OR '1'='1' AND password = 'anything'`
 3. Authentication bypass achieved

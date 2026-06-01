@@ -6,7 +6,7 @@
 
 ## Purpose & Utility
 
-**CSReview** is a universal AI agent skill that performs **ultra-deep security audits** (automated pentest-style analysis) on codebases across multiple languages, frameworks, and platforms.
+**CSReview** is a universal AI agent skill for development-time security alignment of the local workspace a developer is actively building. It applies a penetration tester's adversarial mindset to local source, configuration, dependencies, and infrastructure files (static SAST + SCA), but it does not perform live penetration testing against running, deployed, or production systems.
 
 ### CSReview is READ-ONLY
 
@@ -18,7 +18,14 @@ CSReview **NEVER modifies, deletes, or moves any files** in the analyzed project
 
 The actual fixes are applied by the human developer or the coding agent, not by CSReview.
 
-CSReview exists to slow down unsafe "vibe coding" before production: it inspects code, dependency manifests, framework configuration, database/BaaS rules, frontend/backend boundaries, and platform-specific surfaces, then writes a detailed report explaining what is exposed and why. It does not assume enough business or schema context to change the audited system itself.
+CSReview exists to slow down unsafe "vibe coding" before release: it inspects local code, dependency manifests, framework configuration, database/BaaS rules, frontend/backend boundaries, and platform-specific surfaces, then writes a detailed report explaining what is exposed and why. It does not assume enough business or schema context to change the audited system itself.
+
+### Scope
+
+- **IN SCOPE**: the local development workspace/project, including local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm audit, OSV-Scanner, and framework-native scanners may be run against that local code only.
+- **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
+- **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, or production systems; external service endpoints used by the app; DAST against running targets; modifying audited code; exfiltrating data.
+- **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
 ### Global Skill Installation Only
 
@@ -91,7 +98,7 @@ Security vulnerabilities cost companies billions annually. Most development team
 
 ### Real-World Use Cases
 
-- **Pre-deployment security gate**: Run before pushing to production
+- **Pre-release security gate**: Run before release while reviewing only the local workspace
 - **Code review enhancement**: Augment human code reviews with automated security analysis
 - **Legacy code audit**: Identify vulnerabilities in existing codebases
 - **Compliance preparation**: Find issues before security audits (SOC 2, ISO 27001, LGPD/GDPR)

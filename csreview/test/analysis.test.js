@@ -270,6 +270,30 @@ test('documentation requires global skill installation by default', () => {
   assert.match(docs, /unless the user explicitly asks for project-local installation/i);
 });
 
+test('skill positions CSReview as local development-time security alignment only', () => {
+  const skill = fs.readFileSync('SKILL.md', 'utf8');
+
+  assert.match(skill, /development-time security alignment for the local workspace/i);
+  assert.match(skill, /penetration tester's adversarial mindset/i);
+  assert.match(skill, /static SAST \+ SCA/i);
+  assert.match(skill, /does NOT perform live penetration testing against running, deployed, or production systems/i);
+  assert.match(skill, /## Scope/);
+  assert.match(skill, /IN SCOPE[\s\S]*local development workspace\/project/i);
+  assert.match(skill, /GOAL[\s\S]*SECURITY and EFFICIENCY/i);
+  assert.match(skill, /OUT OF SCOPE \/ PROHIBITED[\s\S]*DAST against running targets/i);
+  assert.match(skill, /Reference documentation research[\s\S]*ALLOWED/i);
+  assert.doesNotMatch(skill, /automated pentest level/i);
+});
+
+test('skill describes exploitation paths as theoretical static-analysis hypotheses', () => {
+  const skill = fs.readFileSync('SKILL.md', 'utf8');
+
+  assert.match(skill, /Potential Exploitation Path \(theoretical, unverified\)/);
+  assert.match(skill, /hypothesis derived from static analysis/i);
+  assert.match(skill, /not a validated or executed exploit/i);
+  assert.doesNotMatch(skill, /Exploitation Scenario/);
+});
+
 test('skill requires explicit report path handoff for humans and coding agents', () => {
   const skill = fs.readFileSync('SKILL.md', 'utf8');
 
