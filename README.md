@@ -31,6 +31,12 @@ This skill performs development-time security alignment for the local workspace 
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
+## Ethical Use & Attribution
+
+CSReview is a white-hat security alignment tool. You may copy, fork, adapt, and replicate it under the MIT License, but the project asks that it be used for good: authorized security reviews, local development hardening, education, and remediation work in the spirit of an ethical hacker / White Hat Hacker. Do not use CSReview to support unauthorized intrusion, exploitation, credential theft, data exfiltration, surveillance, or harm.
+
+Credit should be preserved where practical: CSReview is a Deck Software project idealized by Márcio PS, built with assistance, review, and ideas from AI coding agents and tools including Claude Code, Trae, MiniMax, Qwen, Cascade da Windsurf, Codex, GLM 5.1, MiMo V2.5 Pro, and other reviewer agents.
+
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
 2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
 
@@ -1970,6 +1976,14 @@ CSReview exists to slow down unsafe "vibe coding" before release: it inspects lo
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
+### Ethical Use & Attribution
+
+CSReview may be copied, forked, adapted, and replicated under the MIT License. The project asks that every copy and derivative use it for good: authorized security reviews, local development hardening, education, and remediation work in the spirit of an ethical hacker / White Hat Hacker.
+
+Do not use CSReview to support unauthorized intrusion, exploitation, credential theft, data exfiltration, surveillance, or harm.
+
+Credit should be preserved where practical: CSReview is a **Deck Software** project idealized by **Márcio PS**, built with assistance, review, and ideas from AI coding agents and tools including Claude Code, Trae, MiniMax, Qwen, Cascade da Windsurf, Codex, GLM 5.1, MiMo V2.5 Pro, and other reviewer agents.
+
 ### Global Skill Installation Only
 
 CSReview is a **global agent skill**. Install it in the AI agent's global skills directory, never inside the project being audited unless the user explicitly asks for a project-local installation.
@@ -2534,6 +2548,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
+- Deck Software
+- Márcio PS, idealizer of CSReview
+- Claude Code, Trae, MiniMax, Qwen, Cascade da Windsurf, Codex, GLM 5.1, MiMo V2.5 Pro, and other AI reviewer agents/tools that contributed ideas, review, and assistance
 - OWASP Top 10 - https://owasp.org/www-project-top-ten/
 - OWASP ASVS - https://owasp.org/www-project-application-security-verification-standard/
 - SLSA Framework - https://slsa.dev/

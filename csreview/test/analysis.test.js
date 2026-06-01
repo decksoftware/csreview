@@ -576,7 +576,7 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const semgrep = requiredTools.find(tool => tool.name === 'semgrep');
   const osvScanner = recommendedTools.find(tool => tool.name === 'osv-scanner');
 
-  assert.equal(pkg.version, '0.1.0');
+  assert.equal(pkg.version, '0.1.1');
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
   assert.ok(pkg.keywords.includes('semgrep'));
@@ -584,7 +584,7 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
   assert.equal(pkg.engines.node, '>=18');
-  assert.equal(pkg.author, 'decksoftware');
+  assert.equal(pkg.author, 'Deck Software / Márcio PS');
   assert.match(pkg.dependencies.glob, /^\^13\./);
   assert.equal(semgrep?.required, true);
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);

@@ -16,6 +16,12 @@ This skill performs development-time security alignment for the local workspace 
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
 
+## Ethical Use & Attribution
+
+CSReview is a white-hat security alignment tool. You may copy, fork, adapt, and replicate it under the MIT License, but the project asks that it be used for good: authorized security reviews, local development hardening, education, and remediation work in the spirit of an ethical hacker / White Hat Hacker. Do not use CSReview to support unauthorized intrusion, exploitation, credential theft, data exfiltration, surveillance, or harm.
+
+Credit should be preserved where practical: CSReview is a Deck Software project idealized by Márcio PS, built with assistance, review, and ideas from AI coding agents and tools including Claude Code, Trae, MiniMax, Qwen, Cascade da Windsurf, Codex, GLM 5.1, MiMo V2.5 Pro, and other reviewer agents.
+
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
 2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
 

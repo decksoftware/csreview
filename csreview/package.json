@@ -1,6 +1,6 @@
 {
   "name": "csreview",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Development-time local workspace security alignment for AI coding agents",
   "main": "src/index.js",
   "bin": {
@@ -22,7 +22,7 @@
     "semgrep",
     "code-review"
   ],
-  "author": "decksoftware",
+  "author": "Deck Software / Márcio PS",
   "license": "MIT",
   "files": [
     "src/",
