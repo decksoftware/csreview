@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { calculateSecurityScore } from '../scoring.js';
+import { calculateSecurityScore } from '../score.js';
 
 const SEVERITY_COLORS = {
   CRITICAL: '#dc2626',
@@ -246,8 +246,8 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
             <div class="code-block"><pre><code>${highlightedVuln}</code></pre></div>
           </div>
           <div class="detail-section">
-            <h3>Exploitation Scenario</h3>
-            <p>${escapeHtml(f.exploitation || 'No exploitation scenario provided.')}</p>
+            <h3>Potential Exploitation Path (theoretical)</h3>
+            <p><strong>Static-analysis hypothesis:</strong> ${escapeHtml(f.exploitation || 'No potential exploitation path provided.')} This is not a validated or executed exploit.</p>
           </div>
           <div class="detail-section">
             <h3>Recommended Fix</h3>

@@ -11,7 +11,7 @@ import {
   runAnalysis,
 } from '../src/index.js';
 import { generateHtmlReport } from '../src/reports/html.js';
-import { calculateSecurityScore } from '../src/scoring.js';
+import { calculateSecurityScore } from '../src/score.js';
 
 function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
@@ -80,6 +80,16 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   assert.equal(path.basename(result.reports.markdown), 'codex_security-findings.md');
   assert.ok(fs.existsSync(result.reports.html));
   assert.ok(fs.existsSync(result.reports.markdown));
+
+  const html = fs.readFileSync(result.reports.html, 'utf8');
+  const markdown = fs.readFileSync(result.reports.markdown, 'utf8');
+  assert.match(html, new RegExp(`const reportScore = ${result.score};`));
+  assert.match(markdown, new RegExp(`\\*\\*Security Score\\*\\*: ${result.score}/100`));
+  assert.match(html, /Potential Exploitation Path \(theoretical\)/);
+  assert.match(markdown, /Potential Exploitation Path \(theoretical\)/);
+  assert.match(markdown, /static-analysis hypothesis/i);
+  assert.doesNotMatch(html, /Exploitation Scenario/);
+  assert.doesNotMatch(markdown, /Exploitation Scenario/);
 });
 
 test('runAnalysis scans config and environment files for findings', async () => {

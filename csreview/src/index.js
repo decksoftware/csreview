@@ -6,7 +6,7 @@ import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
 import { generateMarkdownReport } from './reports/markdown.js';
-import { calculateSecurityScore } from './scoring.js';
+import { calculateSecurityScore } from './score.js';
 
 const execFileAsync = promisify(execFile);
 

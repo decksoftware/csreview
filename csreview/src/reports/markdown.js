@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../scoring.js';
+import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
@@ -98,7 +98,7 @@ function getRiskAssessment(findings, score) {
     : 'None';
 
   if (counts.CRITICAL > 0) {
-    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any deployment to production.`;
+    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any release.`;
   }
   if (counts.HIGH > 0) {
     return `The application has a concerning security posture with a score of ${score}/100. ${counts.HIGH} high-severity vulnerabilities were found, with ${topCategory} being the most affected area. These issues should be prioritized in the next sprint cycle to reduce the attack surface.`;
@@ -184,7 +184,7 @@ function buildDetailedFindings(findings) {
     const owaspLink = owaspCode ? `[${owaspCode}](${getOwaspUrl(owaspCode)})` : 'N/A';
     const vibeRiskText = f.vibeRisk ? 'Yes' : 'No';
     const complianceText = f.compliance || 'None specified';
-    const exploitationText = f.exploitation || 'No exploitation scenario provided.';
+    const exploitationText = f.exploitation || 'No potential exploitation path provided.';
     const references = f.references && f.references.length > 0
       ? f.references.map(r => `- ${r}`).join('\n')
       : `- ${getCweUrl(f.cwe)}`;
@@ -216,7 +216,9 @@ ${f.description}
 ${f.vulnerableCode || 'No code snippet available.'}
 \`\`\`
 
-#### Exploitation Scenario
+#### Potential Exploitation Path (theoretical)
+
+Static-analysis hypothesis only; not a validated or executed exploit.
 
 ${exploitationText}
 
