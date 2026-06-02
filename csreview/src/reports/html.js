@@ -298,7 +298,7 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const now = new Date().toISOString().split('T')[0];
   const toolMode = metadata.toolResults?.mode || 'Agent-Only';
   const semgrep = metadata.toolResults?.semgrep || {};
-  const npmAudit = metadata.toolResults?.npmAudit || {};
+  const packageAudit = metadata.toolResults?.packageAudit || metadata.toolResults?.npmAudit || {};
   const osvScanner = metadata.toolResults?.osvScanner || {};
   const assuranceNote =
     totalFindings === 0
@@ -307,9 +307,10 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const semgrepText = semgrep.available
     ? `Semgrep ${escapeHtml(semgrep.version || '')} (${semgrep.rawCount || semgrep.findings?.length || 0} findings)`
     : `Semgrep unavailable${semgrep.error ? `: ${escapeHtml(semgrep.error)}` : ''}. Install with pipx install semgrep, uv tool install semgrep, or brew install semgrep.`;
-  const npmAuditText = npmAudit.available
-    ? `npm audit ${escapeHtml(npmAudit.version || '')} (${npmAudit.rawCount || npmAudit.findings?.length || 0} findings)`
-    : `npm audit not run${npmAudit.reason ? `: ${escapeHtml(npmAudit.reason)}` : npmAudit.error ? `: ${escapeHtml(npmAudit.error)}` : ''}.`;
+  const packageAuditLabel = packageAudit.tool || 'package audit';
+  const packageAuditText = packageAudit.available
+    ? `${escapeHtml(packageAuditLabel)} ${escapeHtml(packageAudit.version || '')} (${packageAudit.rawCount || packageAudit.findings?.length || 0} findings)`
+    : `package audit not run${packageAudit.reason ? `: ${escapeHtml(packageAudit.reason)}` : packageAudit.error ? `: ${escapeHtml(packageAudit.error)}` : ''}.`;
   const osvScannerText = osvScanner.available
     ? `OSV-Scanner ${escapeHtml(osvScanner.version || '')} (${osvScanner.rawCount || osvScanner.findings?.length || 0} findings)`
     : `OSV-Scanner unavailable${osvScanner.error ? `: ${escapeHtml(osvScanner.error)}` : ''}. Install with winget install Google.OSVScanner, brew install osv-scanner, or go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest.`;
@@ -1453,7 +1454,7 @@ a:hover {
             </div>
           </div>
           <p><strong>Semgrep:</strong> ${semgrepText}</p>
-          <p><strong>Dependency scanners:</strong> ${npmAuditText} ${osvScannerText}</p>
+          <p><strong>Dependency scanners:</strong> ${packageAuditText} ${osvScannerText}</p>
           <p>CSReview remains read-only for audited source code and only writes report artifacts.</p>
         </div>
       </div>

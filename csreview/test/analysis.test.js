@@ -8,8 +8,10 @@ import { detectSecrets, detectVulnerabilities } from '../src/detector.js';
 import {
   classifyToolMode,
   deduplicateFindings,
+  detectNodeAuditStrategy,
   normalizeNpmAuditFindings,
   normalizeOsvScannerFindings,
+  normalizePnpmAuditFindings,
   reconcilePartials,
   runAnalysis,
   validateWindowsCmdArgs,
@@ -620,8 +622,9 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const recommendedTools = pkg.csreview?.recommendedExternalTools || [];
   const semgrep = requiredTools.find((tool) => tool.name === 'semgrep');
   const osvScanner = recommendedTools.find((tool) => tool.name === 'osv-scanner');
+  const pnpmAudit = recommendedTools.find((tool) => tool.name === 'pnpm audit');
 
-  assert.equal(pkg.version, '0.1.2');
+  assert.equal(pkg.version, '0.1.3');
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
   assert.ok(pkg.keywords.includes('semgrep'));
@@ -635,6 +638,8 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
   assert.equal(semgrep.verify, 'semgrep --version');
   assert.equal(osvScanner?.purpose, 'multi-ecosystem dependency vulnerability scanning');
+  assert.match(pnpmAudit?.purpose, /pnpm-lock\.yaml/);
+  assert.equal(pnpmAudit?.verify, 'pnpm --version');
 });
 
 test('skill requires external research when framework or security context is uncertain', () => {
@@ -851,6 +856,49 @@ test('normalizes npm audit output into read-only dependency findings', () => {
   assert.equal(findings[0].cwe, 'CWE-1321');
   assert.match(findings[0].fix, /Review lodash/);
   assert.doesNotMatch(findings[0].fix, /npm audit fix/i);
+});
+
+test('normalizes pnpm audit output into read-only dependency findings', () => {
+  const findings = normalizePnpmAuditFindings({
+    advisories: {
+      1106913: {
+        id: 1106913,
+        module_name: 'lodash',
+        severity: 'high',
+        title: 'Command Injection in lodash',
+        overview: 'lodash versions prior to 4.17.21 are vulnerable.',
+        vulnerable_versions: '<4.17.21',
+        patched_versions: '>=4.17.21',
+        recommendation: 'Upgrade to version 4.17.21 or later',
+        cwe: ['CWE-77', 'CWE-94'],
+        url: 'https://github.com/advisories/GHSA-test',
+        findings: [{ version: '4.17.20', paths: ['.>lodash'] }],
+        references: '- https://nvd.nist.gov/vuln/detail/CVE-2021-23337\n- https://github.com/advisories/GHSA-test',
+      },
+    },
+  });
+
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].source, 'pnpm-audit');
+  assert.equal(findings[0].severity, 'HIGH');
+  assert.equal(findings[0].file, 'pnpm-lock.yaml');
+  assert.equal(findings[0].cwe, 'CWE-77');
+  assert.match(findings[0].vulnerableCode, /lodash 4\.17\.20/);
+  assert.match(findings[0].fix, /4\.17\.21/);
+  assert.doesNotMatch(findings[0].fix, /pnpm audit --fix/i);
+});
+
+test('detects pnpm lockfiles before npm audit strategy', () => {
+  const root = makeTempProject();
+  writeFile(root, 'package.json', '{"dependencies":{"lodash":"4.17.20"}}');
+  writeFile(root, 'pnpm-lock.yaml', 'lockfileVersion: 9.0\n');
+
+  const strategy = detectNodeAuditStrategy(root);
+
+  assert.equal(strategy.command, 'pnpm');
+  assert.deepEqual(strategy.args, ['audit', '--json']);
+  assert.equal(strategy.lockfile, 'pnpm-lock.yaml');
+  assert.equal(strategy.source, 'pnpm-audit');
 });
 
 test('normalizes OSV-Scanner output into dependency findings', () => {

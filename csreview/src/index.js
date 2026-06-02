@@ -46,19 +46,23 @@ import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
  * @property {boolean} [skipped]
  * @property {number} [rawCount]
  * @property {Finding[]} [findings]
+ * @property {string} [tool]
+ * @property {string} [manager]
+ * @property {string} [lockfile]
  */
 
 /**
  * @typedef {object} ToolResults
  * @property {string} mode
  * @property {ToolRunResult} semgrep
+ * @property {ToolRunResult} packageAudit
  * @property {ToolRunResult} npmAudit
  * @property {ToolRunResult} osvScanner
  */
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
-const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'osv-scanner', 'python3', 'python']);
+const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'osv-scanner', 'python3', 'python']);
 const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
 
 function executable(command) {
@@ -253,6 +257,13 @@ function createSkippedToolResult(reason) {
       reason,
       findings: [],
     },
+    packageAudit: {
+      available: false,
+      required: false,
+      skipped: true,
+      reason,
+      findings: [],
+    },
     osvScanner: {
       available: false,
       required: false,
@@ -287,7 +298,7 @@ const PARTIAL_REQUIRED_FIELDS = [
   'source',
 ];
 const PARTIAL_TOOL_FIELDS = ['toolExecutions', 'toolRuns', 'toolsExecuted', 'executedTools'];
-const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'osv-scanner', 'trivy']);
+const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'osv-scanner', 'trivy']);
 
 function normalizeKeyPart(value) {
   return String(value || '')
@@ -402,6 +413,7 @@ function normalizeToolName(entry) {
   const value = String(raw).trim().toLowerCase();
   if (!value) return '';
   if (value === 'npm' || value === 'npm audit' || value.includes('npm audit')) return 'npm audit';
+  if (value === 'pnpm' || value === 'pnpm audit' || value.includes('pnpm audit')) return 'pnpm audit';
   if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner'))
     return 'osv-scanner';
   if (value.includes('semgrep')) return 'semgrep';
@@ -625,6 +637,13 @@ function formatNpmFix(vulnerability) {
   return `Review ${vulnerability.name} and update${version} if compatible.${major}`;
 }
 
+function splitReferenceLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^-\s*/, '').trim())
+    .filter((line) => /^https?:\/\//i.test(line));
+}
+
 /**
  * Normalize npm audit JSON into canonical dependency findings.
  *
@@ -660,6 +679,55 @@ export function normalizeNpmAuditFindings(auditJson = {}) {
         'A vulnerable dependency can be exploited when application code reaches the affected package or when package lifecycle behavior is abused.',
       references,
       source: 'npm-audit',
+    };
+  });
+}
+
+function formatPnpmFix(advisory) {
+  if (advisory.recommendation) {
+    return `Review ${advisory.module_name}; ${advisory.recommendation}. Validate the update against the project lockfile and tests before applying it.`;
+  }
+  if (advisory.patched_versions && advisory.patched_versions !== '<0.0.0') {
+    return `Review ${advisory.module_name} and update to a version matching ${advisory.patched_versions} when compatible with the project.`;
+  }
+  return `Review ${advisory.module_name}; pnpm audit did not report a direct safe upgrade. Validate impact and choose a context-aware dependency update or mitigation.`;
+}
+
+/**
+ * Normalize pnpm audit JSON into canonical dependency findings.
+ *
+ * @param {object} auditJson
+ * @returns {Finding[]}
+ */
+export function normalizePnpmAuditFindings(auditJson = {}) {
+  const advisories = auditJson.advisories || {};
+  return Object.values(advisories).map((advisory, index) => {
+    const firstFinding = Array.isArray(advisory.findings) ? advisory.findings[0] || {} : {};
+    const paths = Array.isArray(firstFinding.paths) ? firstFinding.paths.join(', ') : 'dependency tree';
+    const cwe = Array.isArray(advisory.cwe) ? advisory.cwe[0] : 'N/A';
+    const references = [advisory.url, ...splitReferenceLines(advisory.references)].filter(Boolean);
+
+    return {
+      id: `PNPM_AUDIT_${index + 1}`,
+      severity: normalizeSeverity(advisory.severity),
+      category: 'Dependency Vulnerability',
+      name: `pnpm audit: ${advisory.module_name || 'package'}`,
+      description:
+        advisory.title || advisory.overview || `${advisory.module_name} has a known vulnerability in pnpm audit.`,
+      file: 'pnpm-lock.yaml',
+      line: 1,
+      vulnerableCode:
+        `${advisory.module_name || 'package'} ${firstFinding.version || advisory.vulnerable_versions || ''}; affected paths: ${paths}`.trim(),
+      cwe,
+      owasp: 'A06:2021 - Vulnerable and Outdated Components',
+      vibeRisk: false,
+      compliance: 'Known vulnerable dependency reported by pnpm audit',
+      fix: formatPnpmFix(advisory),
+      confidence: 'TOOL-ONLY',
+      exploitation:
+        'A vulnerable dependency can be exploited when application code reaches the affected package or when package lifecycle behavior is abused.',
+      references: [...new Set(references)],
+      source: 'pnpm-audit',
     };
   });
 }
@@ -771,24 +839,104 @@ async function runSemgrep(rootDir) {
   }
 }
 
-async function runNpmAudit(rootDir) {
+export function detectNodeAuditStrategy(rootDir) {
   const packageJsonPath = safeResolveInside(rootDir, 'package.json');
   if (!packageJsonPath || !existsSync(packageJsonPath)) {
+    return {
+      skipped: true,
+      reason: 'package.json not found at project root',
+    };
+  }
+
+  const lockfiles = {
+    pnpm: 'pnpm-lock.yaml',
+    npm: 'package-lock.json',
+    shrinkwrap: 'npm-shrinkwrap.json',
+    yarn: 'yarn.lock',
+  };
+  const hasLockfile = (name) => {
+    const lockPath = safeResolveInside(rootDir, name);
+    return Boolean(lockPath && existsSync(lockPath));
+  };
+
+  if (hasLockfile(lockfiles.pnpm)) {
+    return {
+      command: 'pnpm',
+      args: ['audit', '--json'],
+      versionArgs: ['--version'],
+      label: 'pnpm audit',
+      manager: 'pnpm',
+      lockfile: lockfiles.pnpm,
+      source: 'pnpm-audit',
+    };
+  }
+
+  if (hasLockfile(lockfiles.npm)) {
+    return {
+      command: 'npm',
+      args: ['audit', '--json'],
+      versionArgs: ['--version'],
+      label: 'npm audit',
+      manager: 'npm',
+      lockfile: lockfiles.npm,
+      source: 'npm-audit',
+    };
+  }
+
+  if (hasLockfile(lockfiles.shrinkwrap)) {
+    return {
+      command: 'npm',
+      args: ['audit', '--json'],
+      versionArgs: ['--version'],
+      label: 'npm audit',
+      manager: 'npm',
+      lockfile: lockfiles.shrinkwrap,
+      source: 'npm-audit',
+    };
+  }
+
+  if (hasLockfile(lockfiles.yarn)) {
+    return {
+      skipped: true,
+      manager: 'yarn',
+      lockfile: lockfiles.yarn,
+      reason:
+        'yarn.lock detected; yarn audit JSON is not engine-orchestrated yet. OSV-Scanner covers this lockfile when available.',
+    };
+  }
+
+  return {
+    command: 'npm',
+    args: ['audit', '--json'],
+    versionArgs: ['--version'],
+    label: 'npm audit',
+    manager: 'npm',
+    lockfile: 'package.json',
+    source: 'npm-audit',
+  };
+}
+
+async function runPackageAudit(rootDir) {
+  const strategy = detectNodeAuditStrategy(rootDir);
+  if (strategy.skipped) {
     return {
       available: false,
       required: false,
       skipped: true,
-      reason: 'package.json not found at project root',
+      reason: strategy.reason,
+      tool: strategy.label || 'package audit',
+      manager: strategy.manager,
+      lockfile: strategy.lockfile,
       findings: [],
       rawCount: 0,
     };
   }
 
   try {
-    const versionResult = await execTool('npm', ['--version'], { timeout: 30000 });
+    const versionResult = await execTool(strategy.command, strategy.versionArgs, { timeout: 30000 });
     let stdout = '';
     try {
-      const auditResult = await execTool('npm', ['audit', '--json'], {
+      const auditResult = await execTool(strategy.command, strategy.args, {
         cwd: rootDir,
         timeout: 120000,
         maxBuffer: 20 * 1024 * 1024,
@@ -799,10 +947,14 @@ async function runNpmAudit(rootDir) {
       if (!stdout) throw err;
     }
     const parsed = JSON.parse(stdout || '{}');
-    const findings = normalizeNpmAuditFindings(parsed);
+    const findings =
+      strategy.source === 'pnpm-audit' ? normalizePnpmAuditFindings(parsed) : normalizeNpmAuditFindings(parsed);
     return {
       available: true,
       required: false,
+      tool: strategy.label,
+      manager: strategy.manager,
+      lockfile: strategy.lockfile,
       version: versionResult.stdout.trim(),
       error: null,
       findings,
@@ -812,8 +964,11 @@ async function runNpmAudit(rootDir) {
     return {
       available: false,
       required: false,
+      tool: strategy.label,
+      manager: strategy.manager,
+      lockfile: strategy.lockfile,
       version: null,
-      error: toolErrorMessage('npm', err),
+      error: toolErrorMessage(strategy.label || strategy.command, err),
       findings: [],
       rawCount: 0,
     };
@@ -875,22 +1030,32 @@ async function checkToolVersion(command, args = ['--version']) {
 }
 
 export async function checkExternalTools(rootDir = process.cwd()) {
-  const packageJsonPath = safeResolveInside(rootDir, 'package.json');
-  const hasPackageJson = Boolean(packageJsonPath && existsSync(packageJsonPath));
-  const checks = await Promise.all([
-    checkToolVersion('semgrep'),
-    checkToolVersion('npm'),
-    checkToolVersion('osv-scanner'),
-  ]);
+  const packageStrategy = detectNodeAuditStrategy(rootDir);
+  const packageAuditCheck = packageStrategy.skipped
+    ? {
+        available: false,
+        version: null,
+        error: null,
+        skipped: true,
+        reason: packageStrategy.reason,
+        tool: packageStrategy.label || 'package audit',
+        manager: packageStrategy.manager,
+        lockfile: packageStrategy.lockfile,
+      }
+    : {
+        ...(await checkToolVersion(packageStrategy.command, packageStrategy.versionArgs)),
+        skipped: false,
+        reason: null,
+        tool: packageStrategy.label,
+        manager: packageStrategy.manager,
+        lockfile: packageStrategy.lockfile,
+      };
+  const checks = await Promise.all([checkToolVersion('semgrep'), checkToolVersion('osv-scanner')]);
   return {
     semgrep: { ...checks[0], required: true },
-    npmAudit: {
-      ...checks[1],
-      required: false,
-      skipped: !hasPackageJson,
-      reason: hasPackageJson ? null : 'package.json not found at project root',
-    },
-    osvScanner: { ...checks[2], required: false },
+    packageAudit: { ...packageAuditCheck, required: false },
+    npmAudit: { ...packageAuditCheck, required: false },
+    osvScanner: { ...checks[1], required: false },
   };
 }
 
@@ -906,15 +1071,16 @@ async function runSecurityTools(rootDir, options) {
     return createSkippedToolResult('Tool execution disabled by caller.');
   }
 
-  const [semgrep, npmAudit, osvScanner] = await Promise.all([
+  const [semgrep, packageAudit, osvScanner] = await Promise.all([
     runSemgrep(rootDir),
-    runNpmAudit(rootDir),
+    runPackageAudit(rootDir),
     runOsvScanner(rootDir),
   ]);
   return {
-    mode: classifyToolMode({ semgrep, npmAudit, osvScanner }),
+    mode: classifyToolMode({ semgrep, packageAudit, npmAudit: packageAudit, osvScanner }),
     semgrep,
-    npmAudit,
+    packageAudit,
+    npmAudit: packageAudit,
     osvScanner,
   };
 }
@@ -927,8 +1093,9 @@ async function runSecurityTools(rootDir, options) {
 export function classifyToolMode(toolResults = {}) {
   const relevantTools = [toolResults.semgrep, toolResults.osvScanner];
 
-  if (!toolResults.npmAudit?.skipped) {
-    relevantTools.push(toolResults.npmAudit);
+  const packageAudit = toolResults.packageAudit || toolResults.npmAudit;
+  if (!packageAudit?.skipped) {
+    relevantTools.push(packageAudit);
   }
 
   const concreteTools = relevantTools.filter(Boolean);
@@ -970,7 +1137,7 @@ export async function runAnalysis(rootDir, options = {}) {
   const findings = deduplicateFindings([
     ...detectVulnerabilities(detectorInput),
     ...toolResults.semgrep.findings,
-    ...toolResults.npmAudit.findings,
+    ...toolResults.packageAudit.findings,
     ...toolResults.osvScanner.findings,
     ...partialScan.partialFindings,
   ]);

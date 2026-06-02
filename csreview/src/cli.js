@@ -19,7 +19,7 @@ if (args.includes('--doctor')) {
   /** @type {Array<[string, {available: boolean, version?: string, reason?: string, error?: string}, string]>} */
   const rows = [
     ['Semgrep', tools.semgrep, 'required'],
-    ['npm audit', tools.npmAudit, 'recommended for Node.js'],
+    ['Package audit', tools.packageAudit || tools.npmAudit, 'recommended for Node.js'],
     ['OSV-Scanner', tools.osvScanner, 'recommended'],
   ];
 
@@ -74,7 +74,7 @@ ${chalk.bold('SECURITY TOOLS:')}
   - Semgrep      - Advanced multi-language SAST (pipx install semgrep)
 
   Recommended complements:
-  - npm audit    - Node.js dependency vulnerability scanning
+  - npm/pnpm audit - Node.js dependency vulnerability scanning selected from lockfiles
   - OSV-Scanner  - Multi-ecosystem dependency vulnerability scanning
   `);
   process.exit(0);
@@ -133,12 +133,12 @@ try {
     );
   }
 
-  if (result.toolResults?.npmAudit?.available) {
-    console.log(
-      `  npm audit:      ${result.toolResults.npmAudit.version} (${result.toolResults.npmAudit.rawCount} findings)`,
-    );
-  } else if (result.toolResults?.npmAudit?.reason) {
-    console.log(`  npm audit:      skipped (${result.toolResults.npmAudit.reason})`);
+  const packageAudit = result.toolResults?.packageAudit || result.toolResults?.npmAudit;
+  if (packageAudit?.available) {
+    const packageAuditLabel = packageAudit.tool || 'package audit';
+    console.log(`  Package audit:  ${packageAuditLabel} ${packageAudit.version} (${packageAudit.rawCount} findings)`);
+  } else if (packageAudit?.reason) {
+    console.log(`  Package audit:  skipped (${packageAudit.reason})`);
   }
 
   if (result.toolResults?.osvScanner?.available) {

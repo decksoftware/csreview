@@ -1,6 +1,6 @@
 {
   "name": "csreview",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Development-time local workspace security alignment for AI coding agents",
   "main": "src/index.js",
   "bin": {
@@ -75,12 +75,21 @@
       },
       {
         "name": "npm audit",
-        "purpose": "Node.js dependency vulnerability scanning",
+        "purpose": "npm dependency vulnerability scanning selected when package-lock.json or npm-shrinkwrap.json exists",
         "required": false,
         "install": [
           "Install Node.js/npm"
         ],
         "verify": "npm --version"
+      },
+      {
+        "name": "pnpm audit",
+        "purpose": "pnpm dependency vulnerability scanning selected when pnpm-lock.yaml exists",
+        "required": false,
+        "install": [
+          "Install pnpm"
+        ],
+        "verify": "pnpm --version"
       }
     ]
   },

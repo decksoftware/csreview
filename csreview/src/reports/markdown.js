@@ -540,14 +540,15 @@ function buildToolMetadata(toolResults) {
   }
 
   const semgrep = toolResults.semgrep || {};
-  const npmAudit = toolResults.npmAudit || {};
+  const packageAudit = toolResults.packageAudit || toolResults.npmAudit || {};
   const osvScanner = toolResults.osvScanner || {};
   const semgrepStatus = semgrep.available
     ? `available (${semgrep.version || 'version unknown'}), ${semgrep.rawCount || semgrep.findings?.length || 0} findings`
     : `not available${semgrep.error ? ` (${semgrep.error})` : ''}`;
-  const npmAuditStatus = npmAudit.available
-    ? `available (${npmAudit.version || 'version unknown'}), ${npmAudit.rawCount || npmAudit.findings?.length || 0} findings`
-    : `not run${npmAudit.reason ? ` (${npmAudit.reason})` : npmAudit.error ? ` (${npmAudit.error})` : ''}`;
+  const packageAuditLabel = packageAudit.tool || 'package audit';
+  const packageAuditStatus = packageAudit.available
+    ? `${packageAuditLabel} available (${packageAudit.version || 'version unknown'}), ${packageAudit.rawCount || packageAudit.findings?.length || 0} findings`
+    : `not run${packageAudit.reason ? ` (${packageAudit.reason})` : packageAudit.error ? ` (${packageAudit.error})` : ''}`;
   const osvScannerStatus = osvScanner.available
     ? `available (${osvScanner.version || 'version unknown'}), ${osvScanner.rawCount || osvScanner.findings?.length || 0} findings`
     : `not available${osvScanner.error ? ` (${osvScanner.error})` : ''}`;
@@ -561,7 +562,7 @@ function buildToolMetadata(toolResults) {
   return `- **Analysis Mode**: ${toolResults.mode || 'Agent-Only'}
 - **Semgrep Required**: Yes
 - **Semgrep Status**: ${semgrepStatus}
-- **npm audit Status**: ${npmAuditStatus}
+- **Package Audit Status**: ${packageAuditStatus}
 - **OSV-Scanner Status**: ${osvScannerStatus}${semgrepInstall}${osvInstall}`;
 }
 
