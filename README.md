@@ -362,10 +362,6 @@ pnpm --version
 yarn --version
 # If found: yarn audit --json
 
-# pip-audit for Python
-pip-audit --version
-# If found: pip-audit --format json
-
 # dotnet list package --vulnerable (always available with dotnet)
 dotnet --version
 # If found: dotnet list package --vulnerable --include-transitive

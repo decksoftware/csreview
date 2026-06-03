@@ -36,7 +36,7 @@ if (args.includes('--doctor')) {
 
 if (args.includes('--help') || args.includes('-h') || args.length === 0) {
   console.log(`
-${chalk.bold.cyan('CSReview')} - Universal Security Audit for AI Coding Agents
+${chalk.bold.cyan('CSReview')} - Development-time local workspace security alignment for AI coding agents
 
 ${chalk.bold('USAGE:')}
   csreview <target-directory> [options]
