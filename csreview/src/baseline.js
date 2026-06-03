@@ -125,6 +125,11 @@ export function serializeBaseline(findings = []) {
  * @returns {string}
  */
 export function writeBaseline(filePath, findings = []) {
+  // INVARIANT: filePath must originate from a trusted source (the user's
+  // --baseline/--update-baseline argv), never from audited project content.
+  // This is the only function in CSReview that writes outside csreview-reports/,
+  // so a caller that sourced the path from scanned files would enable an
+  // arbitrary file write. Do not wire untrusted input here.
   const dir = dirname(filePath);
   if (dir && !existsSync(dir)) {
     mkdirSync(dir, { recursive: true });

@@ -134,10 +134,12 @@ function getLanguageFromExtension(file) {
 }
 
 function getCweUrl(cwe) {
-  if (!cwe) return '';
-  const match = String(cwe).match(/CWE-(\d+)/i);
-  if (match) return `https://cwe.mitre.org/data/definitions/${match[1]}.html`;
-  return `https://cwe.mitre.org/data/definitions/${cwe}.html`;
+  // Only build a URL from a clean CWE id. Never interpolate an arbitrary value
+  // into the link target: a crafted `cwe` (e.g. from a subagent partial) such as
+  // `x)](http://evil.com)` would otherwise close the Markdown link early and
+  // inject an attacker-controlled live link into the report.
+  const match = String(cwe || '').match(/CWE-(\d+)/i);
+  return match ? `https://cwe.mitre.org/data/definitions/${match[1]}.html` : '';
 }
 
 function getOwaspUrl(owasp) {

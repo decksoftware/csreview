@@ -75,6 +75,13 @@ export async function checkForUpdate(currentVersion, options = {}) {
     return { ...base, error: 'no fetch implementation (offline or Node < 18)' };
   }
 
+  // Pin the request host by refusing a repo/branch that is not a plain
+  // owner/name + ref. Defaults are already pinned and the CLI never passes user
+  // input, but this prevents a malformed value from redirecting the request.
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !/^[\w./-]+$/.test(branch)) {
+    return { ...base, error: 'invalid repo/branch (refusing to build request URL)' };
+  }
+
   let remoteVersion = null;
   let source = null;
 
@@ -130,6 +137,7 @@ export async function fetchRecentChanges(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const repo = options.repo || DEFAULT_REPO;
   if (typeof fetchImpl !== 'function') return [];
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return [];
   try {
     const commits = await fetchJson(
       fetchImpl,

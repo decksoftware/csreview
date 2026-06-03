@@ -138,3 +138,15 @@ test('buildSarifLog tolerates empty findings', () => {
   assert.equal(log.runs[0].results.length, 0);
   assert.deepEqual(log.runs[0].tool.driver.rules, []);
 });
+
+test('Markdown does not allow link injection through a crafted CWE id (M1)', () => {
+  const out = tmpFile('cwe_security-findings.md');
+  const finding = baseFinding({ id: 'CWEINJ', cwe: 'x)](http://evil.com) and [pwn](http://evil2.com' });
+  generateMarkdownReport({ name: 'demo', files: ['src/app.js'], configFiles: [] }, [finding], out, {});
+  const md = fs.readFileSync(out, 'utf8');
+
+  // The junk cwe must NOT be interpolated into the cwe.mitre.org URL position.
+  assert.doesNotMatch(md, /definitions\/x\)/);
+  // The bracket characters in the field are escaped, so no nested live link.
+  assert.match(md, /\\\[pwn\\\]/);
+});

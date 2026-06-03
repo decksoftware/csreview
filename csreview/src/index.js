@@ -660,7 +660,8 @@ function splitReferenceLines(value) {
  * @returns {Finding[]}
  */
 export function normalizeNpmAuditFindings(auditJson = {}) {
-  const vulnerabilities = auditJson.vulnerabilities || {};
+  if (!isPlainObject(auditJson)) return [];
+  const vulnerabilities = isPlainObject(auditJson.vulnerabilities) ? auditJson.vulnerabilities : {};
   return Object.values(vulnerabilities).map((vulnerability, index) => {
     const advisory = firstAuditAdvisory(vulnerability);
     const cwe = Array.isArray(advisory.cwe) ? advisory.cwe[0] : 'N/A';
@@ -728,7 +729,8 @@ function formatPnpmFix(advisory) {
  * @returns {Finding[]}
  */
 export function normalizePnpmAuditFindings(auditJson = {}) {
-  const advisories = auditJson.advisories || {};
+  if (!isPlainObject(auditJson)) return [];
+  const advisories = isPlainObject(auditJson.advisories) ? auditJson.advisories : {};
   return Object.values(advisories).map((advisory, index) => {
     const firstFinding = Array.isArray(advisory.findings) ? advisory.findings[0] || {} : {};
     const paths = Array.isArray(firstFinding.paths) ? firstFinding.paths.join(', ') : 'dependency tree';
@@ -791,7 +793,8 @@ function normalizeSourcePath(sourcePath, rootDir) {
  */
 export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd()) {
   const findings = [];
-  for (const result of osvJson.results || []) {
+  if (!isPlainObject(osvJson) || !Array.isArray(osvJson.results)) return findings;
+  for (const result of osvJson.results) {
     const sourcePath = normalizeSourcePath(result.source?.path, rootDir);
     for (const pkg of result.packages || []) {
       const pkgInfo = pkg.package || {};

@@ -78,8 +78,23 @@ export function patternToMatcher(rawPattern) {
   if (dirOnly) pattern = pattern.replace(/\/+$/, '');
   const anchored = pattern.startsWith('/');
   if (anchored) pattern = pattern.replace(/^\/+/, '');
-  const hasSlash = pattern.includes('/');
 
+  // Collapse any run of globstar tokens (`**`, optionally separated by `/`) into
+  // a single `**`. Without this, a hostile `.csreview-ignore` like
+  // `**/**/**/.../x` would translate to many ADJACENT unbounded `(?:.*/)?`
+  // groups — the textbook catastrophic-backtracking (ReDoS) shape — and freeze
+  // the scanner on a non-matching path. After collapsing, every `**` becomes a
+  // single group separated by literals, which matches in linear/polynomial time.
+  pattern = pattern.replace(/\*\*(?:\/?\*+)*/g, '**');
+
+  // Defense-in-depth: refuse pathologically wildcard-heavy patterns. Fail-open —
+  // an uncompilable ignore pattern simply suppresses nothing (safer default for
+  // a security tool than hiding findings).
+  if ((pattern.match(/\*/g) || []).length > 100) {
+    return { negate, re: /(?!)/ };
+  }
+
+  const hasSlash = pattern.includes('/');
   const body = translateGlob(pattern);
   const prefix = anchored || hasSlash ? '^' : '(?:^|.*/)';
   const suffix = dirOnly ? '(?:/.*)?$' : '$';

@@ -105,7 +105,7 @@ function partialFingerprint(finding) {
  * @returns {object}
  */
 export function buildSarifLog(_projectInfo = {}, findings = [], metadata = {}) {
-  const safeFindings = Array.isArray(findings) ? findings : [];
+  const safeFindings = (Array.isArray(findings) ? findings : []).filter(Boolean);
   const rules = new Map();
 
   const results = safeFindings.map((finding) => {

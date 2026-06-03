@@ -4,7 +4,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseIgnoreFile, compileIgnorePatterns, isIgnored, applyIgnore, loadIgnore } from '../src/ignore.js';
+import {
+  parseIgnoreFile,
+  compileIgnorePatterns,
+  patternToMatcher,
+  isIgnored,
+  applyIgnore,
+  loadIgnore,
+} from '../src/ignore.js';
 import { runAnalysis } from '../src/index.js';
 
 function match(pattern, file) {
@@ -77,4 +84,31 @@ test('runAnalysis suppresses ignored files from the report', async () => {
 
   assert.ok(result.suppressedByIgnore > 0);
   assert.ok(result.findings.every((f) => f.file !== 'src/app.js'));
+});
+
+test('globstar runs are collapsed and cannot cause catastrophic backtracking (ReDoS H1)', () => {
+  // Hostile pattern: many consecutive globstar segments. Pre-fix this compiled
+  // to adjacent unbounded groups and froze on a non-matching path.
+  const pattern = '**/'.repeat(12) + 'x';
+  const compiled = compileIgnorePatterns([pattern]);
+  const nonMatching = 'a/'.repeat(30) + 'b'; // deep path that does not end in x
+
+  const start = Date.now();
+  const ignored = isIgnored(nonMatching, compiled);
+  const elapsed = Date.now() - start;
+
+  assert.equal(ignored, false);
+  assert.ok(elapsed < 500, `ignore matching took ${elapsed}ms (possible ReDoS)`);
+
+  // Collapsing preserves globstar semantics.
+  assert.ok(isIgnored('a/b/c/x', compileIgnorePatterns(['**/x'])));
+  assert.ok(isIgnored('x', compileIgnorePatterns(['**/x'])));
+  assert.ok(isIgnored('deep/nested/x', compiled));
+});
+
+test('pathologically wildcard-heavy patterns are refused (fail-open)', () => {
+  const matcher = patternToMatcher('*a'.repeat(101)); // 101 single-star tokens
+  assert.equal(matcher.re.source, '(?!)'); // never-match sentinel
+  // Fail-open: a refused pattern suppresses nothing.
+  assert.equal(isIgnored('a'.repeat(101), compileIgnorePatterns(['*a'.repeat(101)])), false);
 });
