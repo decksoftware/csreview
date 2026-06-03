@@ -37,7 +37,7 @@ test('escapeMdInline neutralizes table, code-span, link, and HTML metacharacters
   assert.match(escaped, /\\`/); // backtick escaped
   assert.match(escaped, /\\\[x\\\]/); // brackets escaped -> no link
   assert.match(escaped, /&lt;script&gt;/); // HTML escaped
-  assert.doesNotMatch(escaped, /<script>/);
+  assert.doesNotMatch(escaped, /<\s*script\b/i);
 });
 
 test('escapeMdInline collapses newlines so a field cannot break a table row', () => {
