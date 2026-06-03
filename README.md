@@ -4,6 +4,32 @@
 [![Skill Type](https://img.shields.io/badge/Type-AI%20Agent%20Skill-blue)]()
 [![Compatibility](https://img.shields.io/badge/Compatibility-Trae%20%7C%20Claude%20Code%20%7C%20Codex%20%7C%20Qwen%20%7C%20OpenCode%20%7C%20Antigravity%20%7C%20Qoder-green)]()
 
+## Security tooling CSReview relies on (and can install for you)
+
+CSReview is **local, development-time security alignment** (SAST/SCA + actionable reports + agent support) — **not** an automated penetration test, and it is **read-only on your source code**. Its fidelity — results faithful to the objective, with **far fewer false positives** — comes from running real, best-in-class security tools and corroborating them with its own heuristics (a finding confirmed by both a tool and the detector is marked `CONFIRMED`).
+
+For the highest-quality result, CSReview uses these official tools:
+
+| Tool | Purpose | Official source |
+|------|---------|-----------------|
+| **Semgrep** | Multi-language SAST (required baseline) | https://github.com/semgrep/semgrep |
+| **OSV-Scanner** | Dependency vulnerabilities (SCA) | https://github.com/google/osv-scanner |
+| **Gitleaks** | Hardcoded secret detection | https://github.com/gitleaks/gitleaks |
+| **Trivy** | IaC / container / filesystem misconfig + vulns | https://github.com/aquasecurity/trivy |
+| **Bandit** | Python security (AST) — *run if already installed* | https://github.com/PyCQA/bandit |
+| **gosec** | Go security (AST) | https://github.com/securego/gosec |
+
+> Gitleaks, Trivy, and gosec are single binaries CSReview can auto-download from their official releases (alongside the already-supported Semgrep and OSV-Scanner). **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`).
+
+**These tools need to be installed for a faithful result — and CSReview can install them for you, with your consent.** If a tool is not already on your system, opt in with **`--provision-tools`** and CSReview will:
+
+- download each tool **only from its official release page** (the sources above), pinned to the official host;
+- **verify its SHA-256 checksum before running anything** (a mismatch — or any non-official host — is rejected and never executed);
+- install into an **isolated, gitignored `.csreview/bin/`** inside your project — never globally, never with `sudo`, never as a project dependency, and **never modifying your source code**;
+- **fail open**: if a tool can't be installed (offline, unsupported platform), the scan still runs in lower-confidence "Agent-Only" mode.
+
+Prefer to manage them yourself? Install the tools and CSReview will use whatever is already on your `PATH`; or run without them. Either way, the report tells you which tools ran and which were skipped.
+
 ## Canonical Agent Instructions
 
 The most important artifact in this repository is [csreview/SKILL.md](csreview/SKILL.md): this is the exact instruction file loaded by coding agents. It is mirrored below so GitHub visitors can evaluate the real CSReview behavior from the repository landing page without cloning.
@@ -43,7 +69,7 @@ Credit should be preserved where practical: CSReview is a Deck Software project 
 
 **CSReview is READ-ONLY**: It never modifies, deletes, moves, or creates source code in the analyzed project. It only identifies problems, locates them precisely, and suggests remediation approaches based on the frameworks and technologies in use. The actual fixes are applied later by the human developer or a coding agent after understanding the project context, schema, tests, and regression risk. When encountering unfamiliar frameworks, CSReview researches official documentation and community forums to provide accurate recommendations.
 
-**Global Skill Installation Policy**: CSReview is a global agent skill. It MUST be installed and loaded from the agent's global skills/instructions environment, such as `~/.codex/skills/csreview`, `~/.agents/skills/csreview`, `~/.trae/skills/csreview`, or `~/.claude/skills/csreview`. The agent MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project being audited, including `<project>/.trae/skills/csreview`, `<project>/.codex/skills/csreview`, `<project>/.agents/skills/csreview`, `<project>/.claude/skills/csreview`, `<project>/AGENTS.md`, `<project>/CLAUDE.md`, `.cursorrules`, or `.windsurfrules`, unless the user explicitly asks for project-local installation. Generated reports may be written to the selected output directory, but those reports are audit artifacts, not a skill installation.
+**Global Skill Installation Policy**: CSReview is a global agent skill. It MUST be installed and loaded from the agent's global skills/instructions environment, such as `~/.codex/skills/csreview`, `~/.agents/skills/csreview`, `~/.trae/skills/csreview`, or `~/.claude/skills/csreview`. The agent MUST NOT copy, scaffold, install, update, delete, or move the CSReview skill inside the project being audited, including `<project>/.trae/skills/csreview`, `<project>/.codex/skills/csreview`, `<project>/.agents/skills/csreview`, `<project>/.claude/skills/csreview`, `<project>/AGENTS.md`, `<project>/CLAUDE.md`, `.cursorrules`, or `.windsurfrules`, unless the user explicitly asks for project-local installation. Generated reports may be written to the selected output directory, but those reports are audit artifacts, not a skill installation. Likewise, opt-in tool provisioning (`--provision-tools`) writes only verified tool binaries into an isolated, gitignored `.csreview/` workspace inside the project — that is a local tool cache, not a skill installation and not a modification of the audited source.
 
 **Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. Semgrep is a required external CLI tool, not a normal bundled npm dependency; install it with `pipx install semgrep`, `uv tool install semgrep`, Homebrew, Docker, or the platform package manager. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions.
 
@@ -55,7 +81,9 @@ Credit should be preserved where practical: CSReview is a Deck Software project 
 
 **Pre-flight checks (read-only, fail-open)**: before a scan CSReview can check whether a newer CSReview version exists in the official repository — this is advisory only, it never auto-updates itself, and the agent/user reviews the change before updating (skip with `--no-update-check`). `--doctor` additionally reports whether the available external scanners are on their latest version, but it never auto-upgrades system tools. These checks only query pinned official hosts over HTTPS (`raw.githubusercontent.com`/`api.github.com` for `decksoftware/csreview`, `pypi.org`, `crates.io`, `registry.npmjs.org`), never block the scan when offline, and never execute fetched content.
 
-**Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a recommended tool is unavailable, record it in the report as a `missing recommended tool` with the exact install/documentation pointer. These tools are agent-recommended unless listed under Engine-Orchestrated Tools.
+**Opt-in security-tool provisioning (`--provision-tools`)**: CSReview's fidelity and low false-positive rate depend on running real stack-native security tools and corroborating them with the heuristic detector (a finding seen by both a tool and the detector is promoted to CONFIRMED). When the user opts in with `--provision-tools`, CSReview MAY install the tools it needs — but only safely, and the user is always informed before any download. It downloads each tool ONLY from its official release source (Gitleaks `github.com/gitleaks/gitleaks`, Trivy `github.com/aquasecurity/trivy`, gosec `github.com/securego/gosec`, Bandit from PyPI, plus the already-supported Semgrep and OSV-Scanner), VERIFIES the published SHA-256 checksum before the artifact is made executable or run (a mismatch or a non-official host is rejected, never executed), installs into an ISOLATED, gitignored `.csreview/bin/` workspace (never globally, never `sudo`, never as a project dependency, never modifying the audited source), and FAILS OPEN to lower-confidence Agent-Only mode when a tool cannot be provisioned (offline, unsupported platform, etc.). Without the flag, CSReview runs only tools already on the user's PATH and notes the rest as recommended. The report states which tools actually ran versus heuristic-only.
+
+**Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment, already configured in the workspace, or provisioned with explicit user opt-in (see Opt-in security-tool provisioning above). Do not install missing tools as project dependencies or into the global system, and never modify the audited source. If a recommended tool is unavailable and not provisioned, record it in the report as a `missing recommended tool` with the exact install/documentation pointer. These tools are agent-recommended unless listed under Engine-Orchestrated Tools.
 
 | Detected stack | Prefer read-only commands and scanners |
 | --- | --- |

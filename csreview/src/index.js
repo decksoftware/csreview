@@ -1162,7 +1162,7 @@ export function classifyToolMode(toolResults = {}) {
  * Run a full CSReview static analysis and write reports.
  *
  * @param {string} rootDir
- * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string}} [options]
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string, gatherSecurityTools?: (projectInfo: object, rootDir: string) => Promise<{findings?: Array<object>, results?: Array<object>}>}} [options]
  */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
@@ -1182,12 +1182,32 @@ export async function runAnalysis(rootDir, options = {}) {
   };
 
   const toolResults = await runSecurityTools(absRoot, options);
+
+  // Opt-in, engine-orchestrated stack-native security tools (Gitleaks/Bandit/
+  // gosec/Trivy). The CLI composes the real gatherer (provision + run) behind
+  // --provision-tools; when absent, this is a no-op so the default scan is
+  // unchanged. Fail-open: the suite can never break a scan.
+  let securityToolFindings = [];
+  let securityToolResults = [];
+  if (typeof options.gatherSecurityTools === 'function') {
+    try {
+      const gathered = await options.gatherSecurityTools(projectInfo, absRoot);
+      if (gathered) {
+        securityToolFindings = Array.isArray(gathered.findings) ? gathered.findings : [];
+        securityToolResults = Array.isArray(gathered.results) ? gathered.results : [];
+      }
+    } catch {
+      // never let the optional security-tools suite break a scan
+    }
+  }
+
   const partialScan = readSubagentPartials(outputDir);
   const findings = deduplicateFindings([
     ...detectVulnerabilities(detectorInput),
     ...toolResults.semgrep.findings,
     ...toolResults.packageAudit.findings,
     ...toolResults.osvScanner.findings,
+    ...securityToolFindings,
     ...partialScan.partialFindings,
   ]);
   const partialReconciliation = reconcilePartials(outputDir, findings, {
@@ -1262,6 +1282,7 @@ export async function runAnalysis(rootDir, options = {}) {
     techStack: projectInfo.techStack,
     reports: { html: htmlPath, markdown: mdPath, sarif: sarifPath },
     toolResults,
+    securityTools: securityToolResults,
     partialReconciliation,
     duration: formatDuration(duration),
     findings: reportFindings,

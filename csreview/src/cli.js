@@ -10,6 +10,7 @@ import { scanProject } from './scanner.js';
 import { generateDumpGuide, sanitizeAgentName } from './dumpGuide.js';
 import { checkForUpdate } from './updateCheck.js';
 import { checkToolFreshness } from './toolFreshness.js';
+import { makeSecurityToolGatherer } from './provisionRuntime.js';
 
 const args = process.argv.slice(2);
 
@@ -123,6 +124,7 @@ ${chalk.bold('OPTIONS:')}
   --baseline <file>     Suppress findings already recorded in a baseline JSON file
   --update-baseline     Write/refresh the baseline file from this run (with --baseline or default .csreview-baseline.json)
   --dump-guide          Also generate a read-only per-backend local DB dump guide (auto with --local-dast-url)
+  --provision-tools     Opt-in: run stack-native security tools (Gitleaks/Trivy/Bandit/gosec) and, if missing, download them from OFFICIAL sources (SHA-256 verified) into an isolated, gitignored .csreview/bin/. Higher fidelity, fewer false positives.
   --no-update-check     Skip the pre-flight CSReview self-update check
   --doctor              Check external security tools (and their freshness) without scanning source code
   --help, -h            Show this help message
@@ -190,6 +192,8 @@ if (baselineIdx !== -1 && args[baselineIdx + 1] && !args[baselineIdx + 1].starts
 const updateBaseline = args.includes('--update-baseline');
 const updateBaselinePath = updateBaseline ? baselinePath || resolve(targetDir, DEFAULT_BASELINE_FILE) : null;
 
+const provisionTools = args.includes('--provision-tools');
+
 if (!existsSync(targetDir)) {
   console.error(chalk.red(`\n  Error: Directory not found: ${targetDir}\n`));
   process.exit(1);
@@ -202,6 +206,29 @@ console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
 
 await runUpdatePreflight();
 
+// Opt-in, user-informed security-tool provisioning. CSReview only downloads when
+// you pass --provision-tools; here it tells you exactly what it will install and
+// from where, then runs the tools from an isolated, gitignored .csreview/bin/.
+let securityToolGatherer;
+if (provisionTools) {
+  console.log(chalk.bold('  Security tooling (opt-in provisioning enabled)\n'));
+  console.log(chalk.yellow('  CSReview will use stack-native security tools and, if missing, DOWNLOAD them'));
+  console.log(chalk.yellow('  from their OFFICIAL release pages, verify SHA-256 checksums, and run them from an'));
+  console.log(chalk.yellow('  isolated, gitignored .csreview/bin/ (never globally, never as project deps).'));
+  console.log(chalk.gray('  Auto-installed if missing (official release + SHA-256): Gitleaks, Trivy, gosec.'));
+  console.log(chalk.gray('  Used only if already installed: Bandit (pip install bandit).'));
+  console.log(
+    chalk.gray(
+      '  Sources: github.com/gitleaks/gitleaks · github.com/aquasecurity/trivy · github.com/securego/gosec.\n',
+    ),
+  );
+  securityToolGatherer = makeSecurityToolGatherer({
+    rootDir: targetDir,
+    provision: true,
+    log: (m) => console.log(chalk.gray(`    ${m}`)),
+  });
+}
+
 try {
   const result = await runAnalysis(targetDir, {
     outputDir,
@@ -209,6 +236,7 @@ try {
     strictPartials,
     baselinePath,
     updateBaselinePath,
+    gatherSecurityTools: securityToolGatherer,
   });
 
   console.log(chalk.bold('\n  ----------------------------------------\n'));
@@ -243,6 +271,21 @@ try {
     );
   } else if (result.toolResults?.osvScanner?.error) {
     console.log(`  OSV-Scanner:    recommended but unavailable (${result.toolResults.osvScanner.error})`);
+  }
+
+  if (Array.isArray(result.securityTools) && result.securityTools.length > 0) {
+    console.log(chalk.bold('\n  Stack-native security tools:'));
+    for (const t of result.securityTools) {
+      if (t.available) {
+        console.log(
+          `    ${String(t.tool).padEnd(10)} ${chalk.green('ran')} (${t.source}${t.provisioned ? ', provisioned' : ''}, ${t.rawCount || 0} findings)`,
+        );
+      } else {
+        console.log(
+          `    ${String(t.tool).padEnd(10)} ${chalk.gray('skipped')}${t.reason ? chalk.gray(` (${t.reason})`) : ''}`,
+        );
+      }
+    }
   }
 
   if (result.partialReconciliation?.status && !['skipped', 'empty'].includes(result.partialReconciliation.status)) {
