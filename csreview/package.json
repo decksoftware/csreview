@@ -90,6 +90,15 @@
           "Install pnpm"
         ],
         "verify": "pnpm --version"
+      },
+      {
+        "name": "bun audit",
+        "purpose": "bun dependency vulnerability scanning selected when bun.lockb or bun.lock exists",
+        "required": false,
+        "install": [
+          "Install Bun (https://bun.sh)"
+        ],
+        "verify": "bun --version"
       }
     ]
   },

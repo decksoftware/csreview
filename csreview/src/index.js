@@ -65,7 +65,7 @@ import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
-const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'osv-scanner', 'python3', 'python']);
+const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'bun', 'osv-scanner', 'python3', 'python']);
 const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
 
 function executable(command) {
@@ -186,10 +186,13 @@ function getLanguage(filePath) {
   return LANG_MAP[ext] || 'unknown';
 }
 
-function enrichFiles(filePaths) {
-  return filePaths.map((fp) => ({
+function enrichFiles(projectInfo) {
+  const configSet = new Set(projectInfo.configFiles || []);
+  const baasSet = new Set(projectInfo.baasFiles || []);
+  return uniqueAuditFiles(projectInfo).map((fp) => ({
     path: fp,
     language: getLanguage(fp),
+    kind: baasSet.has(fp) ? 'baas' : configSet.has(fp) ? 'config' : 'source',
   }));
 }
 
@@ -301,7 +304,7 @@ const PARTIAL_REQUIRED_FIELDS = [
   'source',
 ];
 const PARTIAL_TOOL_FIELDS = ['toolExecutions', 'toolRuns', 'toolsExecuted', 'executedTools'];
-const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'osv-scanner', 'trivy']);
+const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'bun audit', 'osv-scanner', 'trivy']);
 
 function normalizeKeyPart(value) {
   return String(value || '')
@@ -417,6 +420,7 @@ function normalizeToolName(entry) {
   if (!value) return '';
   if (value === 'npm' || value === 'npm audit' || value.includes('npm audit')) return 'npm audit';
   if (value === 'pnpm' || value === 'pnpm audit' || value.includes('pnpm audit')) return 'pnpm audit';
+  if (value === 'bun' || value === 'bun audit' || value.includes('bun audit')) return 'bun audit';
   if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner'))
     return 'osv-scanner';
   if (value.includes('semgrep')) return 'semgrep';
@@ -688,6 +692,25 @@ export function normalizeNpmAuditFindings(auditJson = {}) {
   });
 }
 
+/**
+ * Normalize `bun audit --json` output (npm-audit-compatible schema) into
+ * canonical dependency findings.
+ *
+ * @param {object} auditJson
+ * @param {string} [lockfile]
+ * @returns {Finding[]}
+ */
+export function normalizeBunAuditFindings(auditJson = {}, lockfile = 'bun.lock') {
+  return normalizeNpmAuditFindings(auditJson).map((finding, index) => ({
+    ...finding,
+    id: `BUN_AUDIT_${index + 1}`,
+    name: finding.name.replace(/^npm audit:/, 'bun audit:'),
+    file: lockfile,
+    compliance: 'Known vulnerable dependency reported by bun audit',
+    source: 'bun-audit',
+  }));
+}
+
 function formatPnpmFix(advisory) {
   if (advisory.recommendation) {
     return `Review ${advisory.module_name}; ${advisory.recommendation}. Validate the update against the project lockfile and tests before applying it.`;
@@ -900,6 +923,18 @@ export function detectNodeAuditStrategy(rootDir) {
     };
   }
 
+  if (hasLockfile('bun.lockb') || hasLockfile('bun.lock')) {
+    return {
+      command: 'bun',
+      args: ['audit', '--json'],
+      versionArgs: ['--version'],
+      label: 'bun audit',
+      manager: 'bun',
+      lockfile: hasLockfile('bun.lockb') ? 'bun.lockb' : 'bun.lock',
+      source: 'bun-audit',
+    };
+  }
+
   if (hasLockfile(lockfiles.yarn)) {
     return {
       skipped: true,
@@ -952,8 +987,14 @@ async function runPackageAudit(rootDir) {
       if (!stdout) throw err;
     }
     const parsed = JSON.parse(stdout || '{}');
-    const findings =
-      strategy.source === 'pnpm-audit' ? normalizePnpmAuditFindings(parsed) : normalizeNpmAuditFindings(parsed);
+    let findings;
+    if (strategy.source === 'pnpm-audit') {
+      findings = normalizePnpmAuditFindings(parsed);
+    } else if (strategy.source === 'bun-audit') {
+      findings = normalizeBunAuditFindings(parsed, strategy.lockfile);
+    } else {
+      findings = normalizeNpmAuditFindings(parsed);
+    }
     return {
       available: true,
       required: false,
@@ -1130,7 +1171,7 @@ export async function runAnalysis(rootDir, options = {}) {
 
   const projectInfo = await scanProject(absRoot);
 
-  const enrichedFiles = enrichFiles(uniqueAuditFiles(projectInfo));
+  const enrichedFiles = enrichFiles(projectInfo);
 
   const detectorInput = {
     ...projectInfo,

@@ -1198,6 +1198,149 @@ const VULNERABILITY_PATTERNS = [
   },
 ];
 
+// Misconfiguration patterns scoped to config / Infrastructure-as-Code / BaaS
+// files only (firestore.rules, *.tf, Dockerfile, k8s/compose YAML, ORM config,
+// SQL migrations). They are intentionally NOT run on application source code to
+// keep false positives low, and only fire when a file is classified as
+// kind === 'config' | 'baas' by the scanner/orchestrator.
+const CONFIG_MISCONFIG_PATTERNS = [
+  {
+    id: 'BAAS_OPEN_SECURITY_RULES',
+    severity: 'CRITICAL',
+    category: 'Access Control',
+    name: 'Public BaaS Security Rule (allow ... if true)',
+    description: 'Firebase/Firestore/Storage rule grants access unconditionally.',
+    regex: /allow\s+[a-z, ]*(?:read|write|get|list|create|update|delete)[^:]*:\s*if\s+true\b/gi,
+    cwe: 'CWE-284',
+    owasp: 'A01:2021-Broken Access Control',
+    fix: 'Scope rules with request.auth and ownership/role checks; never `if true` in production.',
+    exploitation: 'Any anonymous client can read or overwrite the whole collection/bucket.',
+    confidence: 'HIGH',
+    vibeRisk: true,
+    references: ['https://firebase.google.com/docs/rules/rules-language'],
+  },
+  {
+    id: 'SUPABASE_RLS_DISABLED',
+    severity: 'HIGH',
+    category: 'Access Control',
+    name: 'Row Level Security Disabled',
+    description: 'A migration disables PostgreSQL row level security on a table.',
+    regex: /disable\s+row\s+level\s+security/gi,
+    cwe: 'CWE-284',
+    owasp: 'A01:2021-Broken Access Control',
+    fix: 'Keep RLS enabled and define explicit policies; only the service role should bypass RLS server-side.',
+    exploitation: 'With RLS off, any client using the anon key can read/write every row.',
+    confidence: 'HIGH',
+    vibeRisk: true,
+    references: ['https://supabase.com/docs/guides/database/postgres/row-level-security'],
+  },
+  {
+    id: 'TLS_VERIFICATION_DISABLED',
+    severity: 'HIGH',
+    category: 'Cryptography',
+    name: 'TLS Verification Disabled in Config',
+    description: 'Configuration disables TLS certificate verification.',
+    regex: /(?:rejectUnauthorized|ssl[_-]?verify|verify[_-]?ssl|tls[_-]?verify)\s*[:=]\s*(?:false|0|['"]false['"])/gi,
+    cwe: 'CWE-295',
+    owasp: 'A02:2021-Cryptographic Failures',
+    fix: 'Enable certificate verification; pin or trust the proper CA instead of disabling validation.',
+    exploitation: 'A man-in-the-middle can present any certificate and intercept traffic.',
+    confidence: 'HIGH',
+    vibeRisk: true,
+    references: ['https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html'],
+  },
+  {
+    id: 'OPEN_NETWORK_INGRESS',
+    severity: 'HIGH',
+    category: 'Security Misconfiguration',
+    name: 'Network Open to the World (0.0.0.0/0)',
+    description: 'Security group / firewall ingress allows any source address.',
+    regex: /(?:cidr_blocks?|source_ranges|ingress|allowed_ips?|firewall)[^\n]{0,80}0\.0\.0\.0\/0/gi,
+    cwe: 'CWE-284',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Restrict ingress to known IP ranges or a bastion/VPN; avoid 0.0.0.0/0 on sensitive ports.',
+    exploitation: 'The service is reachable from the entire internet, widening the attack surface.',
+    confidence: 'MEDIUM',
+    vibeRisk: false,
+    references: ['https://cheatsheetseries.owasp.org/cheatsheets/Network_Segmentation_Cheat_Sheet.html'],
+  },
+  {
+    id: 'STORAGE_PUBLIC_ACL',
+    severity: 'HIGH',
+    category: 'Access Control',
+    name: 'Public Object Storage ACL',
+    description: 'Object storage ACL is set to public-read or public-read-write.',
+    regex: /(?:acl|x-amz-acl|access)\s*[:=]\s*['"]?public-read(?:-write)?['"]?/gi,
+    cwe: 'CWE-284',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Use private ACLs with signed URLs or scoped bucket policies for controlled access.',
+    exploitation: 'Anyone can list/download (or upload to) the bucket contents.',
+    confidence: 'MEDIUM',
+    vibeRisk: false,
+    references: ['https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-overview.html'],
+  },
+  {
+    id: 'CONTAINER_PRIVILEGED',
+    severity: 'HIGH',
+    category: 'Security Misconfiguration',
+    name: 'Privileged Container',
+    description: 'Container is configured to run privileged.',
+    regex: /privileged\s*:\s*true/gi,
+    cwe: 'CWE-250',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Drop privileged mode; grant only the specific capabilities required.',
+    exploitation: 'A privileged container can escape to and compromise the host.',
+    confidence: 'MEDIUM',
+    vibeRisk: false,
+    references: ['https://kubernetes.io/docs/concepts/security/pod-security-standards/'],
+  },
+  {
+    id: 'CONTAINER_RUN_AS_ROOT',
+    severity: 'MEDIUM',
+    category: 'Security Misconfiguration',
+    name: 'Container Runs as Root',
+    description: 'Dockerfile sets USER root (or container runs as UID 0).',
+    regex: /(?:^\s*USER\s+root\b|runAsNonRoot\s*:\s*false|runAsUser\s*:\s*0\b)/gi,
+    cwe: 'CWE-250',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Create and switch to a non-root user; set runAsNonRoot: true.',
+    exploitation: 'A container breakout as root maps to higher host privileges.',
+    confidence: 'LOW',
+    vibeRisk: false,
+    references: ['https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html'],
+  },
+  {
+    id: 'WORLD_WRITABLE_PERMISSIONS',
+    severity: 'MEDIUM',
+    category: 'Security Misconfiguration',
+    name: 'World-Writable Permissions (chmod 777)',
+    description: 'Build/config step grants world-writable (777) permissions.',
+    regex: /chmod\s+(?:-[A-Za-z]+\s+)?0?777\b/gi,
+    cwe: 'CWE-732',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Grant the least permission required (e.g. 750/640); avoid 777.',
+    exploitation: 'Any local user can modify the files, enabling tampering or privilege escalation.',
+    confidence: 'MEDIUM',
+    vibeRisk: false,
+    references: ['https://cwe.mitre.org/data/definitions/732.html'],
+  },
+  {
+    id: 'DOCKER_UNPINNED_BASE_IMAGE',
+    severity: 'LOW',
+    category: 'Security Misconfiguration',
+    name: 'Unpinned Base Image (:latest)',
+    description: 'Dockerfile uses a floating :latest base image tag.',
+    regex: /^\s*FROM\s+\S+:latest\b/gi,
+    cwe: 'CWE-1104',
+    owasp: 'A05:2021-Security Misconfiguration',
+    fix: 'Pin a specific version or digest (FROM image@sha256:...) for reproducible, auditable builds.',
+    exploitation: 'A moving base image can silently introduce vulnerable or malicious layers.',
+    confidence: 'LOW',
+    vibeRisk: false,
+    references: ['https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html'],
+  },
+];
+
 const LANGUAGE_MAP = {
   '.js': 'javascript',
   '.mjs': 'javascript',
@@ -1298,6 +1441,10 @@ const COMPLIANCE_MAP = {
   'CWE-693': 'OWASP ASVS V14.4',
   'CWE-548': 'OWASP ASVS V12.5',
   'CWE-242': 'OWASP ASVS V5.3',
+  'CWE-284': 'OWASP ASVS V4.1',
+  'CWE-250': 'OWASP ASVS V1.14',
+  'CWE-732': 'OWASP ASVS V12.3',
+  'CWE-1104': 'OWASP ASVS V14.2',
 };
 
 function redactSecret(value) {
@@ -1415,7 +1562,7 @@ export function detectSecrets(content, filePath) {
   return findings;
 }
 
-function detectInContent(content, filePath, language) {
+function detectInContent(content, filePath, language, kind) {
   const findings = [];
   const patterns = VULNERABILITY_PATTERNS.filter((pattern) => !LANGUAGE_SPECIFIC_PATTERN_IDS.has(pattern.id));
 
@@ -1426,6 +1573,12 @@ function detectInContent(content, filePath, language) {
         patterns.push(extra);
       }
     }
+  }
+
+  // Config / IaC / BaaS misconfiguration patterns are scoped to those file kinds
+  // to keep false positives off application source code.
+  if (kind === 'config' || kind === 'baas') {
+    patterns.push(...CONFIG_MISCONFIG_PATTERNS);
   }
 
   const lines = content.split('\n');
@@ -1503,7 +1656,7 @@ export function detectVulnerabilities(projectInfo) {
 
     if (isMinified) continue;
 
-    const vulnFindings = detectInContent(content, file.path, language);
+    const vulnFindings = detectInContent(content, file.path, language, file.kind);
     allFindings.push(...vulnFindings);
   }
 
@@ -1516,4 +1669,4 @@ export function detectVulnerabilities(projectInfo) {
   return allFindings;
 }
 
-export { SECRET_PATTERNS, VULNERABILITY_PATTERNS, COMPLIANCE_MAP };
+export { SECRET_PATTERNS, VULNERABILITY_PATTERNS, CONFIG_MISCONFIG_PATTERNS, COMPLIANCE_MAP };
