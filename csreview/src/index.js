@@ -64,6 +64,11 @@ import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
  */
 
 const execFileAsync = promisify(execFile);
+
+// `--version` and other quick tool probes should return near-instantly; cap them
+// so a misbehaving tool (e.g. Semgrep's hanging version check) can never block a
+// scan or the doctor.
+const VERSION_CHECK_TIMEOUT_MS = 10000;
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
 const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'bun', 'osv-scanner', 'python3', 'python']);
 const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
@@ -79,6 +84,28 @@ function executable(command) {
 }
 
 /**
+ * Build exec options for a tool, disabling Semgrep's update/version "phone home"
+ * check — it can hang the process (notably on Linux, where `semgrep --version`
+ * prints the version and then blocks on the check). Forced off for every semgrep
+ * invocation unless the user set SEMGREP_ENABLE_VERSION_CHECK explicitly. No-op
+ * for other tools (returns the options object unchanged).
+ *
+ * @param {string} command
+ * @param {import('child_process').ExecFileOptions} [options]
+ * @param {NodeJS.ProcessEnv} [baseEnv]
+ * @returns {import('child_process').ExecFileOptions}
+ */
+export function withToolEnv(command, options = {}, baseEnv = process.env) {
+  if (command !== 'semgrep') return options;
+  return {
+    ...options,
+    // `'0'` first so it is the default, but baseEnv (an explicit user setting)
+    // overrides it, and a caller-provided options.env wins last.
+    env: { SEMGREP_ENABLE_VERSION_CHECK: '0', ...baseEnv, ...(options.env || {}) },
+  };
+}
+
+/**
  * Execute an allowlisted external tool without a shell except for Windows npm-style
  * .cmd shims, which require cmd.exe and are guarded against shell metacharacters.
  *
@@ -91,15 +118,16 @@ function execTool(command, args, options = {}) {
   const commandPath = executable(command);
   const needsShell = process.platform === 'win32' && commandPath.endsWith('.cmd');
   validateWindowsCmdArgs(commandPath, args);
+  const execOptions = withToolEnv(command, options);
   if (needsShell) {
     // Invariant: .cmd tools execute through cmd.exe on Windows, so user-controlled
     // values such as rootDir, targets, agentName, and paths must never be passed
     // in args for .cmd commands. User input belongs in cwd or direct non-.cmd tools.
     return /** @type {Promise<{stdout: string, stderr: string}>} */ (
-      execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], options)
+      execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], execOptions)
     );
   }
-  return /** @type {Promise<{stdout: string, stderr: string}>} */ (execFileAsync(commandPath, args, options));
+  return /** @type {Promise<{stdout: string, stderr: string}>} */ (execFileAsync(commandPath, args, execOptions));
 }
 
 /**
@@ -839,7 +867,7 @@ export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd(
 
 async function runSemgrep(rootDir) {
   try {
-    const versionResult = await execTool('semgrep', ['--version'], { timeout: 30000 });
+    const versionResult = await execTool('semgrep', ['--version'], { timeout: VERSION_CHECK_TIMEOUT_MS });
     const scanResult = await execTool(
       'semgrep',
       ['--config', 'auto', '--json', '--quiet', '--exclude', 'node_modules', '--exclude', 'csreview-reports', rootDir],
@@ -1063,7 +1091,7 @@ async function runOsvScanner(rootDir) {
 
 async function checkToolVersion(command, args = ['--version']) {
   try {
-    const result = await execTool(command, args, { timeout: 30000 });
+    const result = await execTool(command, args, { timeout: VERSION_CHECK_TIMEOUT_MS });
     return {
       available: true,
       version: result.stdout.trim() || result.stderr.trim() || 'version unknown',
