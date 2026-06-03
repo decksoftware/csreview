@@ -38,6 +38,31 @@ test('normalizeGitleaksFindings maps findings and REDACTS the raw secret', () =>
   assert.match(findings[0].vulnerableCode, /REDACTED/);
 });
 
+test('gitleaks/trivy normalizers scrub the raw secret even from free-text fields (L1)', () => {
+  const secret = 'AKIAIOSFODNN7EXAMPLE';
+  const gl = normalizeGitleaksFindings([
+    {
+      RuleID: 'aws',
+      Description: `leaked ${secret} in config`,
+      File: 'a.js',
+      StartLine: 1,
+      Secret: secret,
+      Match: secret,
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(gl), new RegExp(secret));
+
+  const tv = normalizeTrivyFindings({
+    Results: [
+      {
+        Target: 'a.env',
+        Secrets: [{ RuleID: 'aws', Severity: 'CRITICAL', StartLine: 1, Title: `found ${secret}`, Match: secret }],
+      },
+    ],
+  });
+  assert.doesNotMatch(JSON.stringify(tv), new RegExp(secret));
+});
+
 test('normalizeBanditFindings maps severity/CWE and redacts hardcoded-password (B105) code', () => {
   const report = {
     results: [

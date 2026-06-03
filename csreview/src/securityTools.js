@@ -50,6 +50,21 @@ function redactSecret(value) {
 }
 
 /**
+ * Defense-in-depth: strip any occurrence of the raw secret value(s) from a tool's
+ * free-text field (name/description), in case a tool ever echoes the secret into
+ * its rule text. Honors the absolute invariant "never copy a raw secret into the
+ * report" beyond the dedicated secret field.
+ */
+function scrubSecrets(text, ...secrets) {
+  let out = String(text || '');
+  for (const secret of secrets) {
+    const s = String(secret || '');
+    if (s.length >= 4) out = out.split(s).join('[REDACTED]');
+  }
+  return out;
+}
+
+/**
  * Gitleaks `detect --report-format json` output is an array of findings.
  * @param {any} report
  * @returns {Array<object>}
@@ -60,8 +75,8 @@ export function normalizeGitleaksFindings(report) {
     id: `GITLEAKS_${i + 1}`,
     severity: 'CRITICAL',
     category: 'Secrets',
-    name: `Gitleaks: ${f.RuleID || f.Description || 'hardcoded secret'}`,
-    description: f.Description || 'Gitleaks detected a hardcoded secret.',
+    name: scrubSecrets(`Gitleaks: ${f.RuleID || f.Description || 'hardcoded secret'}`, f.Secret, f.Match),
+    description: scrubSecrets(f.Description || 'Gitleaks detected a hardcoded secret.', f.Secret, f.Match),
     file: rel(f.File),
     line: toLine(f.StartLine),
     vulnerableCode: redactSecret(f.Secret || f.Match), // never the raw secret
@@ -205,8 +220,8 @@ export function normalizeTrivyFindings(report) {
         id: `TRIVY_SECRET_${out.length + 1}`,
         severity: sev(s.Severity) || 'CRITICAL',
         category: 'Secrets',
-        name: `Trivy secret: ${s.RuleID || s.Title || 'hardcoded secret'}`,
-        description: s.Title || 'Trivy detected a hardcoded secret.',
+        name: scrubSecrets(`Trivy secret: ${s.RuleID || s.Title || 'hardcoded secret'}`, s.Match),
+        description: scrubSecrets(s.Title || 'Trivy detected a hardcoded secret.', s.Match),
         file: target,
         line: toLine(s.StartLine),
         vulnerableCode: redactSecret(s.Match), // never the raw secret

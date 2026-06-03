@@ -30,8 +30,8 @@ dependency; never touch the global system without consent.** We keep the *idea*
 and make it safe:
 
 - **Opt-in + informed consent.** Provisioning never runs silently. It is gated
-  behind `--provision-tools` and prints exactly **what** will be installed,
-  **from where** (official URL) and the **size** before any download. Default OFF.
+  behind `--provision-tools` and tells the user **what** will be installed and
+  **from where** (the official source) before any download. Default OFF.
 - **Pinned official sources only.** A registry maps tool → official release host;
   the per-platform asset + version are resolved from the official releases API.
   No arbitrary/derived/redirected URLs.

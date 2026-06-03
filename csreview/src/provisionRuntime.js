@@ -1,7 +1,17 @@
 // @ts-check
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, writeFileSync, chmodSync, readdirSync, statSync, copyFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  chmodSync,
+  readdirSync,
+  lstatSync,
+  copyFileSync,
+  rmSync,
+  mkdtempSync,
+} from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { assertOfficialUrl, ensureTool, platformTokens, TOOL_REGISTRY } from './provision.js';
@@ -74,42 +84,85 @@ export async function fetchLatestRelease(repo, fetchImpl = globalThis.fetch, tim
   }
 }
 
+/** Hard ceiling on a single artifact download (defense against oversized responses). */
+export const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
+
+function headerValue(res, name) {
+  try {
+    if (res && res.headers && typeof res.headers.get === 'function') return res.headers.get(name);
+    if (res && res.headers) return res.headers[name];
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
- * Download an artifact (binary) from a pinned official URL. assertOfficialUrl is
- * enforced first. Returns a Buffer.
+ * Fetch following redirects MANUALLY, re-asserting the official-host pin on EVERY
+ * hop (a 3xx from an official host to an arbitrary host would otherwise defeat
+ * the pin). Bounded redirect count.
+ * @param {string} url
+ * @param {typeof fetch} fetchImpl
+ * @param {number} [maxHops]
+ */
+async function fetchOfficialFollowing(url, fetchImpl, maxHops = 5) {
+  let current = String(url);
+  for (let hop = 0; hop <= maxHops; hop += 1) {
+    assertOfficialUrl(current); // re-assert at every hop, including redirects
+    const res = await fetchImpl(current, { headers: { 'User-Agent': 'csreview-provision' }, redirect: 'manual' });
+    const status = res && res.status;
+    if (status && status >= 300 && status < 400) {
+      const location = headerValue(res, 'location');
+      if (!location) throw new Error('redirect without a Location header');
+      current = new URL(location, current).href;
+      continue;
+    }
+    return res;
+  }
+  throw new Error('too many redirects');
+}
+
+/**
+ * Download an artifact (binary) from a pinned official URL. The official-host pin
+ * is enforced on the initial URL and on every redirect hop; the size is capped.
  * @param {string} url
  * @param {typeof fetch} [fetchImpl]
  */
 export async function downloadBuffer(url, fetchImpl = globalThis.fetch) {
-  assertOfficialUrl(url);
-  const res = await fetchImpl(url, { headers: { 'User-Agent': 'csreview-provision' }, redirect: 'follow' });
+  const res = await fetchOfficialFollowing(url, fetchImpl);
   if (!res || !res.ok) throw new Error(`download failed: HTTP ${res ? res.status : 'no-response'}`);
-  return Buffer.from(await res.arrayBuffer());
+  const declared = Number(headerValue(res, 'content-length') || 0);
+  if (declared && declared > MAX_DOWNLOAD_BYTES) throw new Error(`artifact too large (${declared} bytes)`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.length > MAX_DOWNLOAD_BYTES) throw new Error(`artifact too large (${buffer.length} bytes)`);
+  return buffer;
 }
 
 /**
- * Download text (checksums file) from a pinned official URL.
+ * Download text (checksums file) from a pinned official URL (redirect-safe, capped).
  * @param {string} url
  * @param {typeof fetch} [fetchImpl]
  */
 export async function downloadText(url, fetchImpl = globalThis.fetch) {
-  assertOfficialUrl(url);
-  const res = await fetchImpl(url, { headers: { 'User-Agent': 'csreview-provision' }, redirect: 'follow' });
+  const res = await fetchOfficialFollowing(url, fetchImpl);
   if (!res || !res.ok) throw new Error(`download failed: HTTP ${res ? res.status : 'no-response'}`);
-  return res.text();
+  const text = await res.text();
+  if (text.length > 8 * 1024 * 1024) throw new Error('checksums file too large');
+  return text;
 }
 
-/** Default archive extractor: tar for .tar.gz/.tgz, Expand-Archive/unzip for .zip. */
+/**
+ * Default archive extractor. Uses ONLY pure-argv invocations (execFile, no shell,
+ * no string interpolation): `tar` for .tar.gz/.tgz everywhere; on Windows `tar`
+ * (bsdtar, shipped since Win10) also extracts .zip; elsewhere `unzip`. This
+ * avoids any command-injection sink on the extraction path.
+ */
 async function defaultExtract(archivePath, destDir, execImpl = execFileAsync) {
   if (/\.(?:tar\.gz|tgz)$/i.test(archivePath)) {
     await execImpl('tar', ['-xzf', archivePath, '-C', destDir], { timeout: 60000 });
   } else if (/\.zip$/i.test(archivePath)) {
     if (process.platform === 'win32') {
-      await execImpl(
-        'powershell',
-        ['-NoProfile', '-Command', `Expand-Archive -LiteralPath "${archivePath}" -DestinationPath "${destDir}" -Force`],
-        { timeout: 60000 },
-      );
+      await execImpl('tar', ['-xf', archivePath, '-C', destDir], { timeout: 60000 });
     } else {
       await execImpl('unzip', ['-o', archivePath, '-d', destDir], { timeout: 60000 });
     }
@@ -127,10 +180,11 @@ function findBinary(dir, bin) {
       const full = path.join(cur, entry);
       let st;
       try {
-        st = statSync(full);
+        st = lstatSync(full); // N3: lstat (not stat) so we never follow a symlinked member
       } catch {
         continue;
       }
+      if (st.isSymbolicLink()) continue; // never copy a symlinked archive member out
       if (st.isDirectory()) stack.push(full);
       else if (wanted.has(entry)) return full;
     }
@@ -147,9 +201,24 @@ function findBinary(dir, bin) {
  */
 export function installFromArchive({ buffer, assetName, bin, cacheDir, extractImpl = defaultExtract }) {
   mkdirSync(cacheDir, { recursive: true });
-  const tmp = path.join(os.tmpdir(), `csreview-prov-${bin}-${buffer.length}`);
-  mkdirSync(tmp, { recursive: true });
-  const archivePath = path.join(tmp, assetName.split('/').pop() || 'artifact');
+  // N4: make the audited project's .csreview/ gitignored so provisioning never
+  // pollutes the user's VCS (the cache lives at <project>/.csreview/bin).
+  try {
+    const giPath = path.join(path.dirname(cacheDir), '.gitignore');
+    if (!existsSync(giPath)) writeFileSync(giPath, '*\n');
+  } catch {
+    /* best effort */
+  }
+  // N2: unpredictable temp dir (avoids TOCTOU pre-create/symlink on shared hosts).
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'csreview-prov-'));
+  // H1: path.basename strips BOTH `/` and `\` separators (the old split('/') let a
+  // Windows asset name like `..\..\evil.zip` escape tmp). Then assert the archive
+  // path stays inside tmp — a release asset name must never write outside the box.
+  const safeName = path.basename(String(assetName || '')) || 'artifact';
+  const archivePath = path.join(tmp, safeName);
+  if (!path.resolve(archivePath).startsWith(path.resolve(tmp) + path.sep)) {
+    throw new Error(`refusing unsafe archive path for asset "${assetName}"`);
+  }
   writeFileSync(archivePath, buffer);
   // extractImpl is async by default; callers that need the path should await
   // via installFromArchiveAsync. Kept sync-friendly for injected tests.

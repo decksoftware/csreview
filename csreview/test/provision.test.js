@@ -226,3 +226,26 @@ test('TOOL_REGISTRY pins official repos', () => {
   assert.equal(TOOL_REGISTRY.gosec.repo, 'securego/gosec');
   assert.equal(TOOL_REGISTRY.trivy.repo, 'aquasecurity/trivy');
 });
+
+test('ensureTool: a pathOnly tool (bandit) is used if on PATH but NEVER auto-downloaded (M2)', async () => {
+  let releaseFetched = false;
+  const res = await ensureTool('bandit', {
+    provision: true,
+    platform: LINUX,
+    io: {
+      onPath: () => null,
+      cacheLookup: () => null,
+      fetchLatestRelease: async () => {
+        releaseFetched = true;
+        return { assets: [] };
+      },
+    },
+  });
+  assert.equal(res.available, false);
+  assert.match(res.reason, /pip install bandit/);
+  assert.equal(releaseFetched, false); // pathOnly => never hits the releases API
+
+  const onPath = await ensureTool('bandit', { io: { onPath: () => ({ version: '1.7.0' }) } });
+  assert.equal(onPath.available, true);
+  assert.equal(onPath.source, 'path');
+});

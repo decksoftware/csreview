@@ -85,6 +85,17 @@ export const TOOL_REGISTRY = {
     purpose: 'IaC / container / filesystem misconfig + vuln scanner',
     versionArgs: ['--version'],
   },
+  bandit: {
+    name: 'bandit',
+    bin: 'bandit',
+    repo: 'PyCQA/bandit',
+    purpose: 'Python security checker (AST)',
+    versionArgs: ['--version'],
+    // PyPI-distributed, not a single GitHub-release binary, so it is NOT
+    // auto-downloaded via the archive cascade — used only if already on PATH.
+    pathOnly: true,
+    installHint: 'pip install bandit (or pipx install bandit)',
+  },
 };
 
 /**
@@ -227,6 +238,11 @@ export async function ensureTool(toolKey, opts = /** @type {any} */ ({})) {
     const cached = io.cacheLookup && (await io.cacheLookup(spec.bin));
     if (cached) {
       return { ...base, available: true, path: cached.path, source: 'cache', version: cached.version };
+    }
+    // 2b) PATH-only tools (e.g. pip-distributed bandit) are used only if already
+    // installed; CSReview never auto-downloads them via the archive cascade.
+    if (spec.pathOnly) {
+      return { ...base, reason: `not on PATH; install with: ${spec.installHint || 'see tool docs'}` };
     }
     // 3) Opt-in download from the pinned official repo, verified.
     if (!opts.provision) {

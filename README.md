@@ -16,8 +16,10 @@ For the highest-quality result, CSReview uses these official tools:
 | **OSV-Scanner** | Dependency vulnerabilities (SCA) | https://github.com/google/osv-scanner |
 | **Gitleaks** | Hardcoded secret detection | https://github.com/gitleaks/gitleaks |
 | **Trivy** | IaC / container / filesystem misconfig + vulns | https://github.com/aquasecurity/trivy |
-| **Bandit** | Python security (AST) | https://github.com/PyCQA/bandit |
+| **Bandit** | Python security (AST) — *run if already installed* | https://github.com/PyCQA/bandit |
 | **gosec** | Go security (AST) | https://github.com/securego/gosec |
+
+> Gitleaks, Trivy, and gosec are single binaries CSReview can auto-download from their official releases (alongside the already-supported Semgrep and OSV-Scanner). **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`).
 
 **These tools need to be installed for a faithful result — and CSReview can install them for you, with your consent.** If a tool is not already on your system, opt in with **`--provision-tools`** and CSReview will:
 

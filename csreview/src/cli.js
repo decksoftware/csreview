@@ -215,10 +215,11 @@ if (provisionTools) {
   console.log(chalk.yellow('  CSReview will use stack-native security tools and, if missing, DOWNLOAD them'));
   console.log(chalk.yellow('  from their OFFICIAL release pages, verify SHA-256 checksums, and run them from an'));
   console.log(chalk.yellow('  isolated, gitignored .csreview/bin/ (never globally, never as project deps).'));
-  console.log(chalk.gray('  Tools: Gitleaks (secrets) · Trivy (IaC/containers/fs) · Bandit (Python) · gosec (Go).'));
+  console.log(chalk.gray('  Auto-installed if missing (official release + SHA-256): Gitleaks, Trivy, gosec.'));
+  console.log(chalk.gray('  Used only if already installed: Bandit (pip install bandit).'));
   console.log(
     chalk.gray(
-      '  Sources: github.com/gitleaks/gitleaks · github.com/aquasecurity/trivy · PyPI bandit · github.com/securego/gosec.\n',
+      '  Sources: github.com/gitleaks/gitleaks · github.com/aquasecurity/trivy · github.com/securego/gosec.\n',
     ),
   );
   securityToolGatherer = makeSecurityToolGatherer({

@@ -105,3 +105,44 @@ test('makeSecurityToolGatherer runs tools available on PATH (no download when pr
   assert.ok(results.find((r) => r.tool === 'gitleaks').available);
   assert.equal(downloaded, false); // provision:false => never hits the releases API
 });
+
+test('installFromArchiveAsync contains a traversal asset name inside the cache (H1)', async () => {
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-cache-h1-'));
+  const extractImpl = async (_archivePath, destDir) => {
+    fs.writeFileSync(path.join(destDir, 'gitleaks'), 'fake-binary');
+  };
+  // A hostile asset name with both separator styles must not escape the sandbox.
+  const res = await installFromArchiveAsync({
+    buffer: Buffer.from('archive-bytes'),
+    assetName: 'gitleaks_win_x64\\..\\..\\..\\..\\evil.zip',
+    bin: 'gitleaks',
+    cacheDir,
+    extractImpl,
+  });
+  // The resolved binary stays inside the cache dir (containment held).
+  assert.ok(res.path.startsWith(cacheDir), `bin escaped the cache: ${res.path}`);
+  assert.ok(fs.existsSync(res.path));
+});
+
+test('downloadBuffer re-asserts the official host on EVERY redirect hop (M1)', async () => {
+  // 302 from an official host to an EVIL host must be refused on the next hop.
+  const toEvil = /** @type {any} */ (
+    async () => ({ status: 302, ok: false, headers: new Map([['location', 'https://evil.example.com/x.tar.gz']]) })
+  );
+  await assert.rejects(
+    () => downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', toEvil),
+    /non-official host/,
+  );
+
+  // 302 to another OFFICIAL host (GitHub's release-asset CDN) is followed.
+  const toOfficial = /** @type {any} */ (
+    async (url) => {
+      if (url.includes('github.com/gitleaks')) {
+        return { status: 302, headers: new Map([['location', 'https://objects.githubusercontent.com/blob']]) };
+      }
+      return { ok: true, status: 200, headers: new Map(), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+    }
+  );
+  const buf = await downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', toOfficial);
+  assert.ok(Buffer.isBuffer(buf) && buf.length === 3);
+});
