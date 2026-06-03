@@ -1,6 +1,7 @@
 // @ts-check
 import fs from 'fs';
 import { calculateSecurityScore } from '../score.js';
+import { originBreakdown } from './summary.js';
 
 const SEVERITY_COLORS = {
   CRITICAL: '#dc2626',
@@ -315,6 +316,12 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const osvScannerText = osvScanner.available
     ? `OSV-Scanner ${escapeHtml(osvScanner.version || '')} (${osvScanner.rawCount || osvScanner.findings?.length || 0} findings)`
     : `OSV-Scanner unavailable${osvScanner.error ? `: ${escapeHtml(osvScanner.error)}` : ''}. Install with winget install Google.OSVScanner, brew install osv-scanner, or go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest.`;
+
+  const origin = originBreakdown(findings);
+  const originText =
+    origin.rows.length > 0
+      ? origin.rows.map((r) => `${escapeHtml(r.label)} <strong>${r.count}</strong>`).join(' &middot; ')
+      : 'none';
 
   const findingsHtml = findings
     .map((f) => {
@@ -1456,6 +1463,7 @@ a:hover {
           </div>
           <p><strong>Semgrep:</strong> ${semgrepText}</p>
           <p><strong>Dependency scanners:</strong> ${packageAuditText} ${osvScannerText}</p>
+          <p><strong>Findings by origin</strong> (trust corroborated first): ${origin.confirmed} CONFIRMED (tool+detector) &middot; ${originText}</p>
           <p>CSReview remains read-only for audited source code and only writes report artifacts.</p>
         </div>
       </div>

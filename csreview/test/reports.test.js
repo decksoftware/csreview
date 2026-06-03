@@ -174,6 +174,48 @@ test('HTML report logs its generation and save (parity with Markdown/SARIF logs)
   assert.ok(fs.existsSync(out), 'HTML file written');
 });
 
+test('Markdown report includes a findings-by-origin breakdown (trust corroborated first)', () => {
+  const out = tmpFile('origin_security-findings.md');
+  const findings = [
+    baseFinding({ id: 'A', sources: ['csreview-detector', 'gitleaks'], confidence: 'CONFIRMED' }),
+    baseFinding({ id: 'B', sources: ['semgrep'] }),
+  ];
+  generateMarkdownReport({ name: 'demo', files: ['src/app.js'], configFiles: [] }, findings, out, {});
+  const md = fs.readFileSync(out, 'utf8');
+  assert.match(md, /Findings by origin/);
+  assert.match(md, /1 CONFIRMED \(tool\+detector\)/);
+  assert.match(md, /Gitleaks 1/);
+  assert.match(md, /Semgrep 1/);
+});
+
+test('HTML report includes a findings-by-origin breakdown', () => {
+  const out = tmpFile('origin_security-report.html');
+  const findings = [
+    baseFinding({ id: 'A', sources: ['csreview-detector', 'trivy'], confidence: 'CONFIRMED' }),
+    baseFinding({ id: 'B', sources: ['osv-scanner'] }),
+  ];
+  generateHtmlReport(
+    {
+      name: 'demo',
+      files: ['src/app.js'],
+      configFiles: [],
+      depFiles: [],
+      baasFiles: [],
+      frameworks: [],
+      techStack: [],
+      projectType: 'unknown',
+    },
+    findings,
+    out,
+    {},
+  );
+  const html = fs.readFileSync(out, 'utf8');
+  assert.match(html, /Findings by origin/);
+  assert.match(html, /CONFIRMED \(tool\+detector\)/);
+  assert.match(html, /Trivy/);
+  assert.match(html, /OSV-Scanner/);
+});
+
 test('Markdown does not allow link injection through a crafted CWE id (M1)', () => {
   const out = tmpFile('cwe_security-findings.md');
   const finding = baseFinding({ id: 'CWEINJ', cwe: 'x)](http://evil.com) and [pwn](http://evil2.com' });
