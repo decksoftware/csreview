@@ -279,6 +279,7 @@ function buildFileData(findings) {
 }
 
 export function generateHtmlReport(projectInfo, findings, outputPath, metadata = {}) {
+  console.log('Generating HTML report...');
   const score = calculateSecurityScore(findings, projectInfo);
   const scoreColor = getScoreColor(score);
   const scoreLabel = getScoreLabel(score);
@@ -1637,5 +1638,6 @@ document.addEventListener('keydown', function(e) {
 </html>`;
 
   fs.writeFileSync(outputPath, html, 'utf8');
+  console.log(`HTML report saved to ${outputPath}`);
   return outputPath;
 }

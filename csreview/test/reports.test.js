@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { generateMarkdownReport, escapeMdInline, mdCodeSpan, fencedCode } from '../src/reports/markdown.js';
 import { buildSarifLog, generateSarifReport } from '../src/reports/sarif.js';
+import { generateHtmlReport } from '../src/reports/html.js';
 
 function tmpFile(name) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-reports-'));
@@ -137,6 +138,40 @@ test('buildSarifLog tolerates empty findings', () => {
   const log = buildSarifLog({ name: 'demo' }, [], {});
   assert.equal(log.runs[0].results.length, 0);
   assert.deepEqual(log.runs[0].tool.driver.rules, []);
+});
+
+test('HTML report logs its generation and save (parity with Markdown/SARIF logs)', () => {
+  const out = tmpFile('demo_security-report.html');
+  const projectInfo = {
+    name: 'demo',
+    files: ['src/app.js'],
+    configFiles: [],
+    depFiles: [],
+    baasFiles: [],
+    frameworks: [],
+    techStack: [],
+    projectType: 'unknown',
+  };
+  const logs = [];
+  const orig = console.log;
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    const returned = generateHtmlReport(projectInfo, [baseFinding()], out, {});
+    assert.equal(returned, out);
+  } finally {
+    console.log = orig;
+  }
+  // The missing "Generating HTML report..." line is what made the HTML report
+  // look absent in the run output even though it was always written.
+  assert.ok(
+    logs.some((l) => l.includes('Generating HTML report...')),
+    'expected a "Generating HTML report..." log line',
+  );
+  assert.ok(
+    logs.some((l) => l.includes('HTML report saved to')),
+    'expected an "HTML report saved to ..." log line',
+  );
+  assert.ok(fs.existsSync(out), 'HTML file written');
 });
 
 test('Markdown does not allow link injection through a crafted CWE id (M1)', () => {

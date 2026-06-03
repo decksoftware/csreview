@@ -11,6 +11,10 @@ import {
   isIgnored,
   applyIgnore,
   loadIgnore,
+  DEFAULT_IGNORE_DIRS,
+  DEFAULT_IGNORE_FILES,
+  DEFAULT_IGNORE_PATTERNS,
+  buildScannerIgnoreGlobs,
 } from '../src/ignore.js';
 import { runAnalysis } from '../src/index.js';
 
@@ -111,4 +115,85 @@ test('pathologically wildcard-heavy patterns are refused (fail-open)', () => {
   assert.equal(matcher.re.source, '(?!)'); // never-match sentinel
   // Fail-open: a refused pattern suppresses nothing.
   assert.equal(isIgnored('a'.repeat(101), compileIgnorePatterns(['*a'.repeat(101)])), false);
+});
+
+test('DEFAULT_IGNORE_DIRS covers vendored deps, build output, and generated caches', () => {
+  for (const d of [
+    'node_modules',
+    '.git',
+    'dist',
+    'build',
+    'vendor',
+    'target',
+    '__pycache__',
+    '.dart_tool', // Flutter/Dart cache (the dominant external-tool noise source)
+    '.gradle', // Gradle/Android cache
+    '.supabase', // Supabase CLI local runtime state
+    'csreview-reports',
+    '.csreview',
+  ]) {
+    assert.ok(DEFAULT_IGNORE_DIRS.includes(d), `expected DEFAULT_IGNORE_DIRS to include ${d}`);
+  }
+});
+
+test('DEFAULT_IGNORE_PATTERNS are gitignore-syntax and scope external-tool findings to first-party source', () => {
+  const compiled = compileIgnorePatterns(DEFAULT_IGNORE_PATTERNS);
+  // the real-world noise from CaiuPixOld: a Chrome profile under .dart_tool
+  assert.ok(isIgnored('flutter/apps/operator/.dart_tool/chrome-device/Default/Preferences', compiled));
+  assert.ok(isIgnored('supabase-stuff/.supabase/postgres/data/x', compiled));
+  assert.ok(isIgnored('android/app/.gradle/cache/x', compiled));
+  assert.ok(isIgnored('a/node_modules/pkg/index.js', compiled));
+  assert.ok(isIgnored('packages/web/dist/bundle.min.js', compiled));
+  // root-level cache dirs (no parent component) must also match — guards against
+  // an anchoring regression in the matcher (Codex M1)
+  assert.ok(isIgnored('.supabase/local/x', compiled));
+  assert.ok(isIgnored('.dart_tool/package_config.json', compiled));
+  assert.ok(isIgnored('node_modules/pkg/index.js', compiled));
+  // first-party source is never suppressed by the defaults
+  assert.ok(!isIgnored('src/index.js', compiled));
+  assert.ok(!isIgnored('lib/feature.dart', compiled));
+  // the dot-dir default must NOT swallow the real `supabase/` source tree
+  assert.ok(!isIgnored('supabase/migrations/0001_init.sql', compiled));
+  // every default file glob is present in the compiled pattern set (export is intentional, Codex N1)
+  for (const f of DEFAULT_IGNORE_FILES) assert.ok(DEFAULT_IGNORE_PATTERNS.includes(f), `missing default file ${f}`);
+});
+
+test('buildScannerIgnoreGlobs retains every legacy scanner exclusion and adds the new caches', () => {
+  const globs = buildScannerIgnoreGlobs();
+  for (const legacy of [
+    '**/node_modules/**',
+    '**/.git/**',
+    '**/dist/**',
+    '**/build/**',
+    '**/.next/**',
+    '**/.nuxt/**',
+    '**/coverage/**',
+    '**/__pycache__/**',
+    '**/.venv/**',
+    '**/venv/**',
+    '**/.tox/**',
+    '**/.mypy_cache/**',
+    '**/vendor/**',
+    '**/target/**',
+    '**/bin/**',
+    '**/obj/**',
+    '**/*.min.js',
+    '**/*.min.css',
+    '**/.trae/**',
+    '**/.vscode/**',
+    '**/.idea/**',
+    '**/security-report.html',
+    '**/security-findings.md',
+    '**/csreview-report.html',
+    '**/csreview-report.md',
+    '**/*_security-report.html',
+    '**/*_security-findings.md',
+    '**/csreview-reports/**',
+    '**/.csreview/**',
+  ]) {
+    assert.ok(globs.includes(legacy), `regression: lost legacy scanner glob ${legacy}`);
+  }
+  assert.ok(globs.includes('**/.dart_tool/**'));
+  assert.ok(globs.includes('**/.gradle/**'));
+  assert.ok(globs.includes('**/.supabase/**'));
 });
