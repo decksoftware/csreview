@@ -5,6 +5,7 @@
 // detects which backends a project uses and renders an instructional HTML report.
 import fs from 'fs';
 import path from 'path';
+import { safeResolveInside } from './pathSafety.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -292,8 +293,11 @@ ${cards}
 
 function readPackageDeps(rootDir) {
   try {
-    const pkgPath = path.join(rootDir, 'package.json');
-    if (!fs.existsSync(pkgPath)) return [];
+    // Contained resolution (rejects traversal / absolute escapes) instead of a
+    // raw path.join — the joined component is a constant, but this keeps the
+    // codebase's read-only safe-path invariant and clears the scanner warning.
+    const pkgPath = safeResolveInside(rootDir, 'package.json');
+    if (!pkgPath || !fs.existsSync(pkgPath)) return [];
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
     return Object.keys({
       ...(pkg.dependencies || {}),
