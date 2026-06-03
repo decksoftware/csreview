@@ -218,13 +218,13 @@ export async function ensureTool(toolKey, opts = /** @type {any} */ ({})) {
   if (!spec) return { ...base, reason: `unknown tool "${toolKey}"` };
 
   try {
-    // 1) Already on PATH.
-    const onPath = io.onPath && io.onPath(spec.bin);
+    // 1) Already on PATH (probe may be async at runtime; awaiting a sync mock is a no-op).
+    const onPath = io.onPath && (await io.onPath(spec.bin));
     if (onPath) {
       return { ...base, available: true, path: spec.bin, source: 'path', version: onPath.version };
     }
     // 2) Previously provisioned in the isolated cache.
-    const cached = io.cacheLookup && io.cacheLookup(spec.bin);
+    const cached = io.cacheLookup && (await io.cacheLookup(spec.bin));
     if (cached) {
       return { ...base, available: true, path: cached.path, source: 'cache', version: cached.version };
     }
