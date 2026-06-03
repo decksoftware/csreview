@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
+import { originBreakdown } from './summary.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
@@ -624,6 +625,9 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
     const c = String(f.confidence || 'MEDIUM').toUpperCase();
     if (confidenceBreakdown[c] !== undefined) confidenceBreakdown[c]++;
   }
+  const origin = originBreakdown(findings);
+  const originText =
+    origin.rows.length > 0 ? origin.rows.map((r) => `${escapeMdInline(r.label)} ${r.count}`).join(', ') : 'none';
 
   const filesCount = projectInfo.files?.length || 0;
   const configCount = projectInfo.configFiles?.length || 0;
@@ -635,6 +639,7 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
 - **Config Files**: ${configCount}
 ${buildToolMetadata(metadata.toolResults)}
 - **Confidence Breakdown**: ${confidenceBreakdown.CONFIRMED} CONFIRMED, ${confidenceBreakdown['TOOL-ONLY']} TOOL-ONLY, ${confidenceBreakdown.HIGH} HIGH, ${confidenceBreakdown.MEDIUM} MEDIUM, ${confidenceBreakdown.LOW} LOW
+- **Findings by origin** (trust corroborated first): ${origin.confirmed} CONFIRMED (tool+detector), ${originText}
 - **Duration**: ${duration}s`;
 }
 
