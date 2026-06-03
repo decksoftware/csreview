@@ -1,13 +1,80 @@
 #!/usr/bin/env node
 // @ts-check
-import { resolve } from 'path';
-import { existsSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { existsSync, readFileSync } from 'fs';
 import chalk from 'chalk';
 import { checkExternalTools, runAnalysis } from './index.js';
 import { runLocalDast } from './localDast.js';
 import { DEFAULT_BASELINE_FILE } from './baseline.js';
+import { scanProject } from './scanner.js';
+import { generateDumpGuide, sanitizeAgentName } from './dumpGuide.js';
+import { checkForUpdate } from './updateCheck.js';
+import { checkToolFreshness } from './toolFreshness.js';
 
 const args = process.argv.slice(2);
+
+/** Read the installed CSReview version from package.json (best-effort). */
+function readCurrentVersion() {
+  try {
+    return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pre-flight self-update check (READ-ONLY, FAIL-OPEN): advise if a newer
+ * CSReview exists in the official repo. Never applies an update; the agent/user
+ * reviews the change before updating. Skipped with --no-update-check.
+ */
+async function runUpdatePreflight() {
+  if (args.includes('--no-update-check')) return;
+  try {
+    const result = await checkForUpdate(readCurrentVersion(), { timeoutMs: 4000 });
+    if (result.checked && result.updateAvailable) {
+      console.log(
+        chalk.yellow(
+          `\n  Update available: CSReview ${result.latest} (installed ${result.current || 'unknown'}). ` +
+            `Review changes before updating — source: ${result.source}. Use --no-update-check to skip.`,
+        ),
+      );
+    }
+  } catch {
+    // fail-open: never block a scan on the update check
+  }
+}
+
+/**
+ * Pre-flight tool-freshness check (READ-ONLY, FAIL-OPEN): for tools that are
+ * installed, compare against the latest official release. Never auto-upgrades.
+ */
+async function runToolFreshness(tools) {
+  const installed = {
+    semgrep: tools.semgrep?.version,
+    'osv-scanner': tools.osvScanner?.version,
+    npm:
+      (tools.packageAudit || tools.npmAudit)?.manager === 'npm'
+        ? (tools.packageAudit || tools.npmAudit)?.version
+        : null,
+  };
+  try {
+    const freshness = await checkToolFreshness(installed, { timeoutMs: 4000 });
+    if (freshness.length === 0) return;
+    console.log(chalk.bold('\n  Tool freshness:\n'));
+    for (const tool of freshness) {
+      const label =
+        tool.status === 'outdated'
+          ? chalk.yellow(`outdated (latest ${tool.latest})`)
+          : tool.status === 'current'
+            ? chalk.green('current')
+            : chalk.gray('unknown');
+      console.log(`  ${tool.name.padEnd(12)} ${tool.installed || '?'} - ${label}`);
+      if (tool.status === 'outdated') console.log(chalk.gray(`    update: ${tool.update}`));
+    }
+  } catch {
+    // fail-open
+  }
+}
 
 if (args.includes('--doctor')) {
   const targetArg = args.find((arg) => !arg.startsWith('-'));
@@ -28,6 +95,10 @@ if (args.includes('--doctor')) {
     const status = result.available ? chalk.green('available') : chalk.red('missing');
     const detail = result.available ? result.version : result.reason || result.error || 'not found';
     console.log(`  ${name.padEnd(12)} ${status} (${requirement}) - ${detail}`);
+  }
+
+  if (!args.includes('--no-tool-check')) {
+    await runToolFreshness(tools);
   }
 
   console.log('\n  Install Semgrep with: pipx install semgrep');
@@ -51,7 +122,9 @@ ${chalk.bold('OPTIONS:')}
   --strict-partials     Fail when csreview-reports/.partials/ does not reconcile
   --baseline <file>     Suppress findings already recorded in a baseline JSON file
   --update-baseline     Write/refresh the baseline file from this run (with --baseline or default .csreview-baseline.json)
-  --doctor              Check external security tools without scanning source code
+  --dump-guide          Also generate a read-only per-backend local DB dump guide (auto with --local-dast-url)
+  --no-update-check     Skip the pre-flight CSReview self-update check
+  --doctor              Check external security tools (and their freshness) without scanning source code
   --help, -h            Show this help message
 
 ${chalk.bold('EXAMPLES:')}
@@ -126,6 +199,8 @@ console.log(chalk.bold.cyan('\n  CSReview - Security Audit\n'));
 console.log(chalk.gray(`  Target:  ${targetDir}`));
 console.log(chalk.gray(`  Output:  ${outputDir || resolve(targetDir, 'csreview-reports')}`));
 console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
+
+await runUpdatePreflight();
 
 try {
   const result = await runAnalysis(targetDir, {
@@ -217,6 +292,23 @@ try {
   console.log(`    ${chalk.cyan('MD')}    ${result.reports.markdown}`);
   console.log(`    ${chalk.cyan('SARIF')} ${result.reports.sarif}`);
 
+  // Phase 9 helper: a read-only per-backend "safe local dump" guide so the user
+  // can prepare an isolated local copy before any optional local DAST.
+  const wantDumpGuide = args.includes('--dump-guide') || Boolean(localDastUrl);
+  if (wantDumpGuide) {
+    try {
+      const projectInfo = await scanProject(targetDir);
+      const guidePath = resolve(dirname(result.reports.html), `${sanitizeAgentName(agentName)}_db-dump-guide.html`);
+      const guide = generateDumpGuide(projectInfo, guidePath);
+      console.log(`    ${chalk.cyan('GUIDE')} ${guidePath}`);
+      if (guide.detected.length > 0) {
+        console.log(chalk.gray(`    DB backends detected: ${guide.detected.join(', ')}`));
+      }
+    } catch (guideErr) {
+      console.log(chalk.gray(`    (db-dump-guide skipped: ${guideErr.message})`));
+    }
+  }
+
   if (localDastUrl) {
     console.log(chalk.bold('\n  Running Local DAST Complement\n'));
     console.log(chalk.yellow('  Local test environment only. Never use this against production.'));
@@ -230,16 +322,21 @@ try {
       targetUrl: localDastUrl,
       confirmed: localDastConfirmed,
       agentName,
+      runId: new Date().toISOString(),
       outputDir: resolve(targetDir, 'csreview-reports'),
     });
     const suspected = localDast.results.filter((item) => item.status === 'DAST-SUSPECTED').length;
     const clean = localDast.results.filter((item) => item.status === 'DAST-CLEAN').length;
     console.log(`  Target:         ${localDast.target}`);
+    if (localDast.runId) console.log(`  Run ID:         ${localDast.runId}`);
     console.log(`  DAST-SUSPECTED: ${suspected}`);
     console.log(`  DAST-CLEAN:     ${clean}`);
     console.log(chalk.bold('\n  Local DAST Reports:\n'));
     console.log(`    ${chalk.cyan('HTML')}  ${localDast.reports.html}`);
     console.log(`    ${chalk.cyan('MD')}    ${localDast.reports.markdown}`);
+    if (localDast.reports.historyMarkdown) {
+      console.log(chalk.gray(`    history: ${localDast.reports.historyMarkdown}`));
+    }
   } else {
     console.log(chalk.gray('\n  After remediating findings, you may run optional local-only DAST:'));
     console.log(

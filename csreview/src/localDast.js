@@ -203,10 +203,11 @@ function buildCorsResult(targetUrl, response) {
   };
 }
 
-function buildMarkdownReport(projectName, targetUrl, envFiles, results) {
+function buildMarkdownReport(projectName, targetUrl, envFiles, results, runId) {
   const rows = results
     .map((result) => `| ${result.id} | ${result.status} | ${result.severity} | ${result.name} |`)
     .join('\n');
+  const runIdLine = runId ? `\n> **Run ID**: ${runId}` : '';
   const details = results
     .map(
       (result) => `### ${result.id}: ${result.name}
@@ -235,7 +236,7 @@ ${result.response}
 
 > **Project**: ${projectName}
 > **Target**: ${targetUrl.href}
-> **Scope**: Explicitly confirmed localhost/127.0.0.1 only
+> **Scope**: Explicitly confirmed localhost/127.0.0.1 only${runIdLine}
 > **Pre-flight env files scanned**: ${envFiles.length > 0 ? envFiles.join(', ') : 'none found'}
 
 This complementary report sends real HTTP requests only to the confirmed local development server. It does not replace the static CSReview SAST/SCA report and must never be used against external, staging, or production systems.
@@ -252,7 +253,7 @@ ${details}
 `;
 }
 
-function buildHtmlReport(projectName, targetUrl, envFiles, results) {
+function buildHtmlReport(projectName, targetUrl, envFiles, results, runId) {
   const cards = results
     .map(
       (result) => `<article class="card ${escapeHtml(result.status.toLowerCase())}">
@@ -291,7 +292,7 @@ pre { overflow: auto; background: #111827; color: #e5e7eb; padding: 14px; border
 <section class="scope">
 <p><strong>Project:</strong> ${escapeHtml(projectName)}</p>
 <p><strong>Target:</strong> ${escapeHtml(targetUrl.href)}</p>
-<p><strong>Pre-flight env files scanned:</strong> ${escapeHtml(envFiles.length > 0 ? envFiles.join(', ') : 'none found')}</p>
+${runId ? `<p><strong>Run ID:</strong> ${escapeHtml(runId)}</p>\n` : ''}<p><strong>Pre-flight env files scanned:</strong> ${escapeHtml(envFiles.length > 0 ? envFiles.join(', ') : 'none found')}</p>
 <p>This report sends real HTTP requests only to the explicitly confirmed local development server. It must never be used against external, staging, or production systems.</p>
 </section>
 ${cards}
@@ -352,23 +353,48 @@ export async function runLocalDast(rootDir, options = {}) {
       ? JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name || path.basename(absRoot)
       : path.basename(absRoot);
   const agentName = sanitizeAgentName(options.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex');
+  const runId =
+    typeof options.runId === 'string' && options.runId.trim()
+      ? options.runId
+          .trim()
+          .replace(/[^A-Za-z0-9_.-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 64) || null
+      : null;
+
   const htmlPath = safeResolveInside(outputDir, `${agentName}_local-dast-report.html`);
   const mdPath = safeResolveInside(outputDir, `${agentName}_local-dast-findings.md`);
   if (!htmlPath || !mdPath) {
     throw new Error('Unable to resolve local DAST report output paths safely.');
   }
 
-  fs.writeFileSync(mdPath, buildMarkdownReport(projectName, targetUrl, envFiles, results), 'utf8');
-  fs.writeFileSync(htmlPath, buildHtmlReport(projectName, targetUrl, envFiles, results), 'utf8');
+  const markdownReport = buildMarkdownReport(projectName, targetUrl, envFiles, results, runId);
+  const htmlReport = buildHtmlReport(projectName, targetUrl, envFiles, results, runId);
+  fs.writeFileSync(mdPath, markdownReport, 'utf8');
+  fs.writeFileSync(htmlPath, htmlReport, 'utf8');
+
+  // When a runId is provided, also write non-overwriting history copies so a
+  // re-run after remediation does not clobber the previous run's evidence. The
+  // stable latest files above are always kept for predictable tooling paths.
+  /** @type {{html: string, markdown: string, historyHtml?: string, historyMarkdown?: string}} */
+  const reports = { html: htmlPath, markdown: mdPath };
+  if (runId) {
+    const historyHtml = safeResolveInside(outputDir, `${agentName}_local-dast-report-${runId}.html`);
+    const historyMd = safeResolveInside(outputDir, `${agentName}_local-dast-findings-${runId}.md`);
+    if (historyHtml && historyMd) {
+      fs.writeFileSync(historyMd, markdownReport, 'utf8');
+      fs.writeFileSync(historyHtml, htmlReport, 'utf8');
+      reports.historyHtml = historyHtml;
+      reports.historyMarkdown = historyMd;
+    }
+  }
 
   return {
     target: targetUrl.href,
+    runId,
     envFiles,
     envWarnings,
     results,
-    reports: {
-      html: htmlPath,
-      markdown: mdPath,
-    },
+    reports,
   };
 }
