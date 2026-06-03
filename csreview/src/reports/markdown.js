@@ -34,6 +34,7 @@ export function escapeMdInline(value) {
  */
 export function mdCodeSpan(value) {
   const text = String(value ?? '')
+    .replace(/\\/g, '\\\\')
     .replace(/\r?\n/g, ' ')
     .replace(/`/g, '')
     .replace(/\|/g, '\\|');
