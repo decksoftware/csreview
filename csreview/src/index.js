@@ -7,6 +7,7 @@ import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
 import { generateMarkdownReport } from './reports/markdown.js';
+import { generateSarifReport } from './reports/sarif.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
@@ -1155,7 +1156,8 @@ export async function runAnalysis(rootDir, options = {}) {
 
   const htmlPath = safeResolveInside(outputDir, `${agentName}_security-report.html`);
   const mdPath = safeResolveInside(outputDir, `${agentName}_security-findings.md`);
-  if (!htmlPath || !mdPath) {
+  const sarifPath = safeResolveInside(outputDir, `${agentName}_security.sarif`);
+  if (!htmlPath || !mdPath || !sarifPath) {
     throw new Error('Unable to resolve report output paths safely.');
   }
 
@@ -1165,6 +1167,7 @@ export async function runAnalysis(rootDir, options = {}) {
     partialReconciliation,
     analysisStartTime: startTime,
   });
+  generateSarifReport(projectInfo, findings, sarifPath);
 
   const duration = Date.now() - startTime;
 
@@ -1188,7 +1191,7 @@ export async function runAnalysis(rootDir, options = {}) {
     frameworks: projectInfo.frameworks,
     projectType: projectInfo.projectType,
     techStack: projectInfo.techStack,
-    reports: { html: htmlPath, markdown: mdPath },
+    reports: { html: htmlPath, markdown: mdPath, sarif: sarifPath },
     toolResults,
     partialReconciliation,
     duration: formatDuration(duration),
