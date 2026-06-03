@@ -103,7 +103,9 @@ export function patternToMatcher(rawPattern) {
   // user's own .csreview-ignore or built-in defaults (a local dev tool), and the
   // behaviour is unit-tested (ignore.test.js "ReDoS H1"). The dynamic RegExp is
   // intrinsic to a glob matcher, so this audit finding is suppressed inline.
-  return { negate, re: new RegExp(prefix + body + suffix) }; // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+  // Bare nosemgrep (not rule-id-scoped) so the suppression is robust to how the
+  // CI's `--config auto` resolves the rule's internal id.
+  return { negate, re: new RegExp(prefix + body + suffix) }; // nosemgrep
 }
 
 /**
