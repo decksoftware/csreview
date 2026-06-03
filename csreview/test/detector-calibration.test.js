@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { detectVulnerabilities } from '../src/detector.js';
+import { runAnalysis } from '../src/index.js';
 
 // Calibration guards driven by real user feedback: the internal detector was
 // "shouting fire because it saw the word match in the dictionary" — WEAK_CIPHER
@@ -83,4 +85,21 @@ test('findings in non-source paths (test/fixtures) are downgraded; real source k
   assert.equal(inSrc.severity, 'CRITICAL', 'real source finding keeps full severity');
   assert.equal(inTest.severity, 'LOW', 'test/fixture finding is downgraded to LOW');
   assert.equal(inTest.confidence, 'LOW');
+});
+
+test('the shipped .csreview-ignore keeps a csreview self-audit free of rule-definition meta-FPs', async () => {
+  // A scanner must not flag its own rulebook: detector.js (regexes/descriptions/
+  // exploitation strings) and dumpGuide.js (sample connection strings) match the
+  // detector's own definitions only when csreview audits itself. The shipped
+  // .csreview-ignore suppresses them. (Reported by Thiago via GPT.)
+  const pkgRoot = fileURLToPath(new URL('..', import.meta.url));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-selfscan-'));
+  const result = await runAnalysis(pkgRoot, { outputDir: out, runTools: false });
+  const ruleDefHits = result.findings.filter((f) => /src[\\/](?:detector|dumpGuide)\.js/.test(String(f.file)));
+  assert.equal(
+    ruleDefHits.length,
+    0,
+    `rule-definition files must be suppressed, got: ${ruleDefHits.map((f) => `${f.file}:${f.line}`).join(', ')}`,
+  );
+  assert.ok(result.suppressedByIgnore > 0, 'expected the .csreview-ignore to suppress the rule-definition meta-FPs');
 });
