@@ -274,7 +274,10 @@ export const RUN_SPECS = {
   },
   trivy: {
     normalize: normalizeTrivyFindings,
-    argv: (rootDir) => ['fs', '--scanners', 'vuln,misconfig,secret', '--format', 'json', '--quiet', rootDir],
+    // misconfig + secret only: dependency vulnerabilities are already covered by
+    // OSV-Scanner, and dropping `vuln` avoids Trivy's large vulnerability-DB
+    // download (which otherwise blows the run timeout on the first scan).
+    argv: (rootDir) => ['fs', '--scanners', 'misconfig,secret', '--format', 'json', '--quiet', rootDir],
     parsesStdout: true,
   },
 };
@@ -285,25 +288,43 @@ export const RUN_SPECS = {
  * checksum-verified tool path). Fail-open: any error yields available:false.
  *
  * @param {string} toolKey
- * @param {{ rootDir: string, toolPath: string, exec: (path: string, argv: string[]) => Promise<{stdout: string, stderr?: string}> }} opts
+ * @param {{ rootDir: string, toolPath: string, exec: (path: string, argv: string[]) => Promise<{stdout: string, stderr?: string}>, retryDelayMs?: number }} opts
  * @returns {Promise<{tool: string, available: boolean, findings: Array<object>, rawCount: number, error?: string}>}
  */
 export async function runSecurityTool(toolKey, opts) {
   const spec = RUN_SPECS[toolKey];
   if (!spec) return { tool: toolKey, available: false, findings: [], rawCount: 0, error: `unknown tool ${toolKey}` };
-  try {
+
+  const runOnce = async () => {
     const { stdout } = await opts.exec(opts.toolPath, spec.argv(opts.rootDir));
     const parsed = JSON.parse(stdout || (toolKey === 'gitleaks' ? '[]' : '{}'));
     const findings = spec.normalize(parsed);
     return { tool: toolKey, available: true, findings, rawCount: findings.length };
-  } catch (err) {
-    return {
-      tool: toolKey,
-      available: false,
-      findings: [],
-      rawCount: 0,
-      error: err && err.message ? err.message : String(err),
-    };
+  };
+
+  try {
+    return await runOnce();
+  } catch (firstErr) {
+    const message = firstErr && firstErr.message ? firstErr.message : String(firstErr);
+    // Never retry a timeout (that would double a slow scan). DO retry a transient
+    // failure once — a freshly provisioned binary can be briefly locked on Windows
+    // (e.g. by antivirus) the instant after it is downloaded.
+    const isTimeout = Boolean(firstErr && (firstErr.killed || /timed?\s*out|ETIMEDOUT/i.test(message)));
+    if (isTimeout) {
+      return { tool: toolKey, available: false, findings: [], rawCount: 0, error: message };
+    }
+    await new Promise((resolve) => setTimeout(resolve, opts.retryDelayMs == null ? 400 : opts.retryDelayMs));
+    try {
+      return await runOnce();
+    } catch (secondErr) {
+      return {
+        tool: toolKey,
+        available: false,
+        findings: [],
+        rawCount: 0,
+        error: secondErr && secondErr.message ? secondErr.message : String(secondErr),
+      };
+    }
   }
 }
 

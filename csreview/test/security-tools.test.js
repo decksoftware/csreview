@@ -190,12 +190,52 @@ test('runSecurityTool parses injected stdout and is fail-open on errors', async 
   const throwExec = async () => {
     throw new Error('ENOENT');
   };
-  const fail = await runSecurityTool('gitleaks', { rootDir: '/p', toolPath: 'gitleaks', exec: throwExec });
+  const fail = await runSecurityTool('gitleaks', {
+    rootDir: '/p',
+    toolPath: 'gitleaks',
+    exec: throwExec,
+    retryDelayMs: 0,
+  });
   assert.equal(fail.available, false);
   assert.match(fail.error, /ENOENT/);
 
   const unknown = await runSecurityTool('nope', { rootDir: '/p', toolPath: 'x', exec: okExec });
   assert.equal(unknown.available, false);
+});
+
+test('runSecurityTool retries once on a transient failure but not on a timeout', async () => {
+  // Transient: first call throws (e.g. just-provisioned binary briefly locked), second succeeds.
+  let calls = 0;
+  const flakyExec = async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('EBUSY: resource busy or locked');
+    return { stdout: JSON.stringify([{ RuleID: 'x', File: 'a.js', StartLine: 1, Secret: 'zzzz' }]) };
+  };
+  const retried = await runSecurityTool('gitleaks', {
+    rootDir: '/p',
+    toolPath: 'gitleaks',
+    exec: flakyExec,
+    retryDelayMs: 0,
+  });
+  assert.equal(retried.available, true);
+  assert.equal(calls, 2);
+
+  // Timeout: must NOT retry (would double a slow scan).
+  let timeoutCalls = 0;
+  const timeoutExec = async () => {
+    timeoutCalls += 1;
+    const e = new Error('Command failed: timed out');
+    /** @type {any} */ (e).killed = true;
+    throw e;
+  };
+  const timedOut = await runSecurityTool('trivy', {
+    rootDir: '/p',
+    toolPath: 'trivy',
+    exec: timeoutExec,
+    retryDelayMs: 0,
+  });
+  assert.equal(timedOut.available, false);
+  assert.equal(timeoutCalls, 1);
 });
 
 test('runSecurityTool passes the rootDir only as argv (no shell interpolation)', async () => {
