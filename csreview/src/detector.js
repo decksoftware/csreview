@@ -692,8 +692,12 @@ const VULNERABILITY_PATTERNS = [
     category: 'Cryptography',
     name: 'Weak Cipher Algorithm',
     description: 'DES, RC4, Blowfish, or ECB mode.',
+    // Context-bound: only real crypto APIs (createCipheriv, Cipher.getInstance,
+    // CryptoJS.*, <Algo>.new(), MODE_ECB, algorithm/cipher config). Never a bare
+    // "des"/"rc4"/"ecb" substring — the old `(?:DES|RC4|Blowfish|ECB)\b` (case-
+    // insensitive, no leading boundary) matched inclu*des*/exclu*des*/mo*des*.
     regex:
-      /(?:createCipheriv?\s*\(\s*['"](?:des|rc4|bf|blowfish|ecb)|(?:DES|RC4|Blowfish|ECB)\b|(?:Cipher|cipher)\s*\(\s*['"](?:des|rc4|bf))/gi,
+      /(?:createCipher(?:iv)?\s*\(\s*['"`](?:des|3des|rc4|rc2|bf|blowfish)\b|createCipheriv\s*\(\s*['"`][a-z0-9-]*-ecb\b|Cipher\.getInstance\s*\(\s*['"`][^'"`]*(?:\bDES|\bRC4|\bRC2|\bBlowfish|\bECB)|CryptoJS\.(?:DES|TripleDES|RC4|RC2|Blowfish)\b|\b(?:DES3?|ARC4|RC4|RC2|Blowfish)\.new\s*\(|\bMODE_ECB\b|(?:algorithm|cipher)\s*[:=]\s*['"`](?:des|3des|rc4|rc2|bf|blowfish)\b)/gi,
     cwe: 'CWE-327',
     owasp: 'A02:2021-Cryptographic Failures',
     fix: 'Use AES-256-GCM or ChaCha20-Poly1305.',
@@ -1658,6 +1662,29 @@ export function detectVulnerabilities(projectInfo) {
 
     const vulnFindings = detectInContent(content, file.path, language, file.kind);
     allFindings.push(...vulnFindings);
+  }
+
+  // Post-process the merged set:
+  // 1) Deterministic, globally-unique IDs. The per-file `${id}_${index}` scheme
+  //    collided across files (WEAK_CIPHER_0 appeared in every file).
+  // 2) Downgrade findings in non-source paths (tests/fixtures/examples/docs):
+  //    intentional test vectors and example keys should not crater the score.
+  //    They stay visible at LOW rather than being hidden entirely.
+  const idCounts = new Map();
+  for (const finding of allFindings) {
+    const base = String(finding.id).replace(/_\d+$/, '');
+    const slug = String(finding.file || 'unknown')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const key = `${base}_${slug}_${finding.line}`;
+    const seen = idCounts.get(key) || 0;
+    idCounts.set(key, seen + 1);
+    finding.id = seen > 0 ? `${key}_${seen}` : key;
+
+    if (finding.severity !== 'INFO' && isNonSourcePath(finding.file)) {
+      finding.severity = 'LOW';
+      finding.confidence = 'LOW';
+    }
   }
 
   allFindings.sort((a, b) => {
