@@ -1,0 +1,198 @@
+// @ts-check
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { detectVulnerabilities } from '../src/detector.js';
+
+// A small labeled corpus to guard detector precision (no false positives on safe
+// code) and recall (catches the intended vulnerable class). Each positive lists
+// the CWE it must surface; each negative must produce no HIGH/CRITICAL finding.
+
+const POSITIVES = [
+  {
+    name: 'js-sqli',
+    file: 'src/a.js',
+    language: 'javascript',
+    cwe: 'CWE-89',
+    code: 'export const f = (id) => db.query(`SELECT * FROM users WHERE id=${id}`);\n',
+  },
+  {
+    name: 'js-eval',
+    file: 'src/b.js',
+    language: 'javascript',
+    cwe: 'CWE-95',
+    code: 'export const run = (req) => eval(req.body.code);\n',
+  },
+  {
+    name: 'js-cmd',
+    file: 'src/c.js',
+    language: 'javascript',
+    cwe: 'CWE-78',
+    code: 'export const ls = (req) => exec("ls " + req.query.dir);\n',
+  },
+  {
+    name: 'react-xss',
+    file: 'src/d.jsx',
+    language: 'javascript',
+    cwe: 'CWE-79',
+    code: 'export const C = (userInput) => <div dangerouslySetInnerHTML={{ __html: userInput }} />;\n',
+  },
+  {
+    name: 'dom-xss',
+    file: 'src/e.js',
+    language: 'javascript',
+    cwe: 'CWE-79',
+    code: 'export const set = (el, userInput) => { el.innerHTML = userInput; };\n',
+  },
+  {
+    name: 'weak-md5',
+    file: 'src/f.js',
+    language: 'javascript',
+    cwe: 'CWE-328',
+    code: 'import crypto from "crypto";\nexport const h = (x) => crypto.createHash("md5").update(x).digest("hex");\n',
+  },
+  {
+    name: 'py-pickle',
+    file: 'src/g.py',
+    language: 'python',
+    cwe: 'CWE-502',
+    code: 'import pickle\n\ndef load(data):\n    return pickle.loads(data)\n',
+  },
+  {
+    name: 'py-shell',
+    file: 'src/h.py',
+    language: 'python',
+    cwe: 'CWE-78',
+    code: 'import subprocess\n\ndef run(cmd):\n    return subprocess.run(cmd, shell=True)\n',
+  },
+  {
+    name: 'go-sqli',
+    file: 'src/i.go',
+    language: 'go',
+    cwe: 'CWE-89',
+    code: 'package main\nfunc q(db DB, x string) { db.Query(fmt.Sprintf("SELECT * FROM t WHERE id=%s", x)) }\n',
+  },
+  {
+    name: 'aws-secret',
+    file: 'src/j.js',
+    language: 'javascript',
+    cwe: 'CWE-798',
+    code: 'export const key = "AKIAIOSFODNN7EXAMPLE";\n',
+  },
+  {
+    name: 'jwt-none',
+    file: 'src/k.js',
+    language: 'javascript',
+    cwe: 'CWE-347',
+    code: 'export const opts = { algorithm: "none" };\n',
+  },
+  {
+    name: 'path-traversal',
+    file: 'src/l.js',
+    language: 'javascript',
+    cwe: 'CWE-22',
+    code: 'import fs from "fs";\nexport const read = (req, cb) => fs.readFile(req.query.path, cb);\n',
+  },
+];
+
+const NEGATIVES = [
+  {
+    name: 'param-query',
+    file: 'src/n1.js',
+    language: 'javascript',
+    code: 'export const f = (id) => db.query("SELECT * FROM users WHERE id = ?", [id]);\n',
+  },
+  {
+    name: 'json-parse',
+    file: 'src/n2.js',
+    language: 'javascript',
+    code: 'export const f = (req) => JSON.parse(req.body.data);\n',
+  },
+  {
+    name: 'exec-file',
+    file: 'src/n3.js',
+    language: 'javascript',
+    code: 'import { execFile } from "child_process";\nexport const ls = (safeDir) => execFile("ls", [safeDir]);\n',
+  },
+  {
+    name: 'text-content',
+    file: 'src/n4.js',
+    language: 'javascript',
+    code: 'export const set = (el, userInput) => { el.textContent = userInput; };\n',
+  },
+  {
+    name: 'sha256',
+    file: 'src/n5.js',
+    language: 'javascript',
+    code: 'import crypto from "crypto";\nexport const h = (x) => crypto.createHash("sha256").update(x).digest("hex");\n',
+  },
+  {
+    name: 'yaml-safe',
+    file: 'src/n6.py',
+    language: 'python',
+    code: 'import yaml\n\ndef load(data):\n    return yaml.safe_load(data)\n',
+  },
+  {
+    name: 'subprocess-list',
+    file: 'src/n7.py',
+    language: 'python',
+    code: 'import subprocess\n\ndef run(d):\n    return subprocess.run(["ls", d])\n',
+  },
+  {
+    name: 'go-param',
+    file: 'src/n8.go',
+    language: 'go',
+    code: 'package main\nfunc q(db DB, id string) { db.Query("SELECT * FROM t WHERE id=$1", id) }\n',
+  },
+  {
+    name: 'random-bytes',
+    file: 'src/n9.js',
+    language: 'javascript',
+    code: 'import crypto from "crypto";\nexport const token = () => crypto.randomBytes(32).toString("hex");\n',
+  },
+  { name: 'plain', file: 'src/n10.js', language: 'javascript', code: 'export const x = (a, b) => compute(a, b);\n' },
+];
+
+function runOne(sample) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-corpus-'));
+  const abs = path.join(root, sample.file);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, sample.code, 'utf8');
+  return detectVulnerabilities({
+    root,
+    files: [{ path: sample.file, language: sample.language, kind: 'source' }],
+  });
+}
+
+function canonicalCwe(cwe) {
+  return (String(cwe || '').match(/CWE-\d+/i) || [''])[0].toUpperCase();
+}
+
+test('detector recall on the positive corpus is >= 0.8', () => {
+  let hits = 0;
+  const misses = [];
+  for (const sample of POSITIVES) {
+    const findings = runOne(sample);
+    if (findings.some((f) => canonicalCwe(f.cwe) === sample.cwe)) {
+      hits += 1;
+    } else {
+      misses.push(sample.name);
+    }
+  }
+  const recall = hits / POSITIVES.length;
+  assert.ok(recall >= 0.8, `recall ${recall.toFixed(2)} too low; missed: ${misses.join(', ')}`);
+});
+
+test('detector produces no HIGH/CRITICAL false positives on the negative corpus', () => {
+  const falsePositives = [];
+  for (const sample of NEGATIVES) {
+    const findings = runOne(sample);
+    const highOrCritical = findings.filter((f) => f.severity === 'CRITICAL' || f.severity === 'HIGH');
+    if (highOrCritical.length > 0) {
+      falsePositives.push(`${sample.name}: ${highOrCritical.map((f) => f.id).join(', ')}`);
+    }
+  }
+  assert.equal(falsePositives.length, 0, `unexpected false positives: ${falsePositives.join(' | ')}`);
+});
