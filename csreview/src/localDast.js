@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
+// Node's URL parser returns the bracketed form for IPv6 loopback (e.g. new URL('http://[::1]').hostname === '[::1]').
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const PREFLIGHT_ENV_FILES = ['.env', '.env.local', '.env.development'];
 const SECURITY_HEADERS = [
   'content-security-policy',
@@ -78,8 +79,13 @@ function extractAssignedHost(line) {
   return null;
 }
 
+// Pre-flight is advisory, not blocking: a real dev .env almost always references external
+// hosts (DB, auth, storage). Blocking on that would make Phase 9 unusable. The hard guards
+// are elsewhere: the target must be localhost/127.0.0.1 (validateTargetUrl) and responses
+// must not redirect to external hosts (assertNoExternalRedirect). Here we only WARN.
 function runEnvPreflight(rootDir) {
   const scanned = [];
+  const warnings = [];
   for (const envFile of PREFLIGHT_ENV_FILES) {
     const envPath = safeResolveInside(rootDir, envFile);
     if (!envPath || !fs.existsSync(envPath)) continue;
@@ -88,19 +94,18 @@ function runEnvPreflight(rootDir) {
 
     for (const url of extractUrls(content)) {
       if (!isLocalUrl(url)) {
-        const host = new URL(url).hostname;
-        throw new Error(`abort Phase 9: ${envFile} references external host ${host}.`);
+        warnings.push({ file: envFile, host: new URL(url).hostname });
       }
     }
 
     for (const line of content.split(/\r?\n/)) {
       const assignedHost = extractAssignedHost(line);
       if (assignedHost) {
-        throw new Error(`abort Phase 9: ${envFile} references external host ${assignedHost}.`);
+        warnings.push({ file: envFile, host: assignedHost });
       }
     }
   }
-  return scanned;
+  return { scanned, warnings };
 }
 
 function headersToObject(headers) {
@@ -198,10 +203,11 @@ function buildCorsResult(targetUrl, response) {
   };
 }
 
-function buildMarkdownReport(projectName, targetUrl, envFiles, results) {
+function buildMarkdownReport(projectName, targetUrl, envFiles, results, runId) {
   const rows = results
     .map((result) => `| ${result.id} | ${result.status} | ${result.severity} | ${result.name} |`)
     .join('\n');
+  const runIdLine = runId ? `\n> **Run ID**: ${runId}` : '';
   const details = results
     .map(
       (result) => `### ${result.id}: ${result.name}
@@ -230,7 +236,7 @@ ${result.response}
 
 > **Project**: ${projectName}
 > **Target**: ${targetUrl.href}
-> **Scope**: Explicitly confirmed localhost/127.0.0.1 only
+> **Scope**: Explicitly confirmed localhost/127.0.0.1 only${runIdLine}
 > **Pre-flight env files scanned**: ${envFiles.length > 0 ? envFiles.join(', ') : 'none found'}
 
 This complementary report sends real HTTP requests only to the confirmed local development server. It does not replace the static CSReview SAST/SCA report and must never be used against external, staging, or production systems.
@@ -247,7 +253,7 @@ ${details}
 `;
 }
 
-function buildHtmlReport(projectName, targetUrl, envFiles, results) {
+function buildHtmlReport(projectName, targetUrl, envFiles, results, runId) {
   const cards = results
     .map(
       (result) => `<article class="card ${escapeHtml(result.status.toLowerCase())}">
@@ -286,13 +292,29 @@ pre { overflow: auto; background: #111827; color: #e5e7eb; padding: 14px; border
 <section class="scope">
 <p><strong>Project:</strong> ${escapeHtml(projectName)}</p>
 <p><strong>Target:</strong> ${escapeHtml(targetUrl.href)}</p>
-<p><strong>Pre-flight env files scanned:</strong> ${escapeHtml(envFiles.length > 0 ? envFiles.join(', ') : 'none found')}</p>
+${runId ? `<p><strong>Run ID:</strong> ${escapeHtml(runId)}</p>\n` : ''}<p><strong>Pre-flight env files scanned:</strong> ${escapeHtml(envFiles.length > 0 ? envFiles.join(', ') : 'none found')}</p>
 <p>This report sends real HTTP requests only to the explicitly confirmed local development server. It must never be used against external, staging, or production systems.</p>
 </section>
 ${cards}
 </main>
 </body>
 </html>`;
+}
+
+function buildEnvWarningResult(targetUrl, warning, index) {
+  return {
+    id: `DAST-ENV-${index + 1}`,
+    status: 'DAST-SUSPECTED',
+    severity: 'LOW',
+    name: 'Local .env references an external host',
+    category: 'Dynamic Analysis (DAST)',
+    target: targetUrl.href,
+    command: `grep -iE "host|url|uri|endpoint" ${warning.file}`,
+    response: `${warning.file} references ${warning.host}`,
+    description: `${warning.file} references external host ${warning.host}. Phase 9 still probes only the confirmed local target and never follows redirects to external hosts, but verify your local app does not proxy DAST traffic to this host during the test.`,
+    recommendation:
+      'Use a local test database/copy and local service stubs so the app under test does not reach external/production endpoints while you run the probe.',
+  };
 }
 
 export async function runLocalDast(rootDir, options = {}) {
@@ -302,7 +324,7 @@ export async function runLocalDast(rootDir, options = {}) {
 
   const absRoot = normalizeLocalPath(rootDir);
   const targetUrl = validateTargetUrl(options.targetUrl);
-  const envFiles = runEnvPreflight(absRoot);
+  const { scanned: envFiles, warnings: envWarnings } = runEnvPreflight(absRoot);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== 'function') {
     throw new Error('Local DAST requires a fetch implementation available in Node.js >=18.');
@@ -321,6 +343,9 @@ export async function runLocalDast(rootDir, options = {}) {
   const baseResponse = await fetchHead(fetchImpl, targetUrl);
   const corsResponse = await fetchHead(fetchImpl, targetUrl, { Origin: 'https://evil.com' });
   const results = [buildSecurityHeaderResult(targetUrl, baseResponse), buildCorsResult(targetUrl, corsResponse)];
+  for (const warning of envWarnings) {
+    results.push(buildEnvWarningResult(targetUrl, warning, results.length));
+  }
 
   const packageJsonPath = safeResolveInside(absRoot, 'package.json');
   const projectName =
@@ -328,22 +353,48 @@ export async function runLocalDast(rootDir, options = {}) {
       ? JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).name || path.basename(absRoot)
       : path.basename(absRoot);
   const agentName = sanitizeAgentName(options.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex');
+  const runId =
+    typeof options.runId === 'string' && options.runId.trim()
+      ? options.runId
+          .trim()
+          .replace(/[^A-Za-z0-9_.-]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 64) || null
+      : null;
+
   const htmlPath = safeResolveInside(outputDir, `${agentName}_local-dast-report.html`);
   const mdPath = safeResolveInside(outputDir, `${agentName}_local-dast-findings.md`);
   if (!htmlPath || !mdPath) {
     throw new Error('Unable to resolve local DAST report output paths safely.');
   }
 
-  fs.writeFileSync(mdPath, buildMarkdownReport(projectName, targetUrl, envFiles, results), 'utf8');
-  fs.writeFileSync(htmlPath, buildHtmlReport(projectName, targetUrl, envFiles, results), 'utf8');
+  const markdownReport = buildMarkdownReport(projectName, targetUrl, envFiles, results, runId);
+  const htmlReport = buildHtmlReport(projectName, targetUrl, envFiles, results, runId);
+  fs.writeFileSync(mdPath, markdownReport, 'utf8');
+  fs.writeFileSync(htmlPath, htmlReport, 'utf8');
+
+  // When a runId is provided, also write non-overwriting history copies so a
+  // re-run after remediation does not clobber the previous run's evidence. The
+  // stable latest files above are always kept for predictable tooling paths.
+  /** @type {{html: string, markdown: string, historyHtml?: string, historyMarkdown?: string}} */
+  const reports = { html: htmlPath, markdown: mdPath };
+  if (runId) {
+    const historyHtml = safeResolveInside(outputDir, `${agentName}_local-dast-report-${runId}.html`);
+    const historyMd = safeResolveInside(outputDir, `${agentName}_local-dast-findings-${runId}.md`);
+    if (historyHtml && historyMd) {
+      fs.writeFileSync(historyMd, markdownReport, 'utf8');
+      fs.writeFileSync(historyHtml, htmlReport, 'utf8');
+      reports.historyHtml = historyHtml;
+      reports.historyMarkdown = historyMd;
+    }
+  }
 
   return {
     target: targetUrl.href,
+    runId,
     envFiles,
+    envWarnings,
     results,
-    reports: {
-      html: htmlPath,
-      markdown: mdPath,
-    },
+    reports,
   };
 }

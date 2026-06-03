@@ -1,0 +1,25 @@
+# Normalize line endings to LF in the repository and on checkout for ALL
+# platforms. Without this, GitHub's actions/checkout on windows-latest converts
+# text files to CRLF, which makes `prettier --check` (default endOfLine: lf)
+# fail in CI even though the committed blobs are LF. Forcing eol=lf keeps the
+# lint/format gate consistent across Windows, macOS, and Linux.
+* text=auto eol=lf
+
+# Windows-only script types keep CRLF (none are currently committed, but this
+# avoids surprising future contributors).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets must never be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

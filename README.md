@@ -26,7 +26,7 @@ This skill performs development-time security alignment for the local workspace 
 
 ## Scope
 
-- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is in scope only after remediation work, only with explicit user confirmation, and only against `localhost` or `127.0.0.1`.
+- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is in scope only after remediation work, only with explicit user confirmation, and only against `localhost`, `127.0.0.1`, or the IPv6 loopback `[::1]`.
 - **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
@@ -39,6 +39,7 @@ Credit should be preserved where practical: CSReview is a Deck Software project 
 
 1. **HTML Report** (`csreview-reports/<agent>_security-report.html`) - Visual report for human review with executive summary, charts, and detailed findings
 2. **Markdown Report** (`csreview-reports/<agent>_security-findings.md`) - Structured report for humans and coding agents to understand, prioritize, and plan remediations without CSReview modifying the audited code
+3. **SARIF Report** (`csreview-reports/<agent>_security.sarif`) - SARIF 2.1.0 for CI pipelines and GitHub code scanning ingestion. It never embeds raw vulnerable code, so secrets are not leaked into the uploaded artifact.
 
 **CSReview is READ-ONLY**: It never modifies, deletes, moves, or creates source code in the analyzed project. It only identifies problems, locates them precisely, and suggests remediation approaches based on the frameworks and technologies in use. The actual fixes are applied later by the human developer or a coding agent after understanding the project context, schema, tests, and regression risk. When encountering unfamiliar frameworks, CSReview researches official documentation and community forums to provide accurate recommendations.
 
@@ -46,7 +47,13 @@ Credit should be preserved where practical: CSReview is a Deck Software project 
 
 **Semgrep is mandatory as a baseline SAST attempt**: every CSReview run MUST attempt to execute `semgrep --version` and `semgrep --config auto --json --quiet <project_path>` before relying on agent-only analysis. Semgrep is a required external CLI tool, not a normal bundled npm dependency; install it with `pipx install semgrep`, `uv tool install semgrep`, Homebrew, Docker, or the platform package manager. If Semgrep is unavailable, the report MUST state that the run has lower confidence and include installation instructions.
 
-**Dependency SCA complements Semgrep**: when available, the deterministic npm engine orchestrates and parses Node package audit tools selected by lockfile: `npm audit --json` for npm lockfiles and `pnpm audit --json` for `pnpm-lock.yaml`. It also parses `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL are agent-recommended stack-native tools: the agent may run them when relevant and available, but they are not parsed by the npm engine unless explicitly added to the engine-orchestrated tool list.
+**Dependency SCA complements Semgrep**: when available, the deterministic npm engine orchestrates and parses Node package audit tools selected by lockfile: `npm audit --json` for npm lockfiles, `pnpm audit --json` for `pnpm-lock.yaml`, and `bun audit --json` for `bun.lockb`/`bun.lock` (npm/pnpm take priority when more than one lockfile is present). It also parses `osv-scanner scan --format json <project_path>` for multi-ecosystem lockfile/manifests. These tools complement Semgrep by identifying known vulnerable dependency versions without changing source code or package files. Framework-native lint/scanning tools such as ESLint security plugins, pip-audit, Bandit, Gosec, cargo audit, dotnet vulnerable package checks, Checkov, Hadolint, Trivy, Snyk, and CodeQL are agent-recommended stack-native tools: the agent may run them when relevant and available, but they are not parsed by the npm engine unless explicitly added to the engine-orchestrated tool list.
+
+**Config and BaaS misconfiguration detection**: on files classified as configuration/IaC/BaaS (Firebase/Firestore/Storage rules, SQL migrations, Dockerfiles, Kubernetes/Compose YAML, Terraform, ORM config), CSReview additionally checks for high-signal misconfigurations such as public BaaS rules (`allow ... if true`), disabled Row Level Security, disabled TLS verification, `0.0.0.0/0` network ingress, public object-storage ACLs, privileged/run-as-root containers, world-writable permissions, and unpinned `:latest` base images. These config patterns are scoped to those file kinds and are not run against application source code, to keep false positives low.
+
+**CI integration and noise control**: CSReview also emits a SARIF 2.1.0 report (`<agent>_security.sarif`) for CI pipelines and code-scanning dashboards. A `.csreview-ignore` file at the project root (gitignore-style globs: `**`, `*`, `?`, anchored `/x`, directory `x/`, and `!negation`) suppresses findings for matching paths in the report only — it is read-only and never modifies the project. A baseline of known findings can be recorded with `--update-baseline` and enforced with `--baseline <file>` so CI fails only on NEW findings; baseline fingerprints are line-independent so they survive code shifting.
+
+**Pre-flight checks (read-only, fail-open)**: before a scan CSReview can check whether a newer CSReview version exists in the official repository — this is advisory only, it never auto-updates itself, and the agent/user reviews the change before updating (skip with `--no-update-check`). `--doctor` additionally reports whether the available external scanners are on their latest version, but it never auto-upgrades system tools. These checks only query pinned official hosts over HTTPS (`raw.githubusercontent.com`/`api.github.com` for `decksoftware/csreview`, `pypi.org`, `crates.io`, `registry.npmjs.org`), never block the scan when offline, and never execute fetched content.
 
 **Stack-Native Tool Recommendation Matrix**: after detecting the languages, frameworks, package managers, and lockfiles in the workspace, CSReview MUST select the relevant read-only tools below. Run a tool only if it is already available in the user's environment or already configured in the workspace. Do not install missing tools inside the analyzed project. If a recommended tool is unavailable, record it in the report as a `missing recommended tool` with the exact install/documentation pointer. These tools are agent-recommended unless listed under Engine-Orchestrated Tools.
 
@@ -86,7 +93,7 @@ When external research is used, include source names and URLs in the finding ref
 
 The coding agent must not infer findings from the verbal summary alone. For remediation work, it must read the Markdown report path first, then inspect the referenced source files, framework documentation, schemas, tests, and security advisories before proposing or applying changes.
 
-**Phase 9: Optional Local DAST Complementary Report**: after the user or coding agent has implemented and validated remediations from the static CSReview report, the agent MUST inform the user that an optional broader local dynamic validation is available. This phase is not part of the default SAST/SCA run and MUST NOT start automatically.
+**Phase 9: Optional Local DAST Complementary Report**: after the user or coding agent has implemented and validated remediations from the static CSReview report, the agent MUST inform the user that an optional broader local dynamic validation is available. This phase is not part of the default SAST/SCA run and MUST NOT start automatically. It is a conservative local HTTP probe (security headers + CORS checks), NOT a full penetration test; for active probing install and run a dedicated tool such as Nuclei against the confirmed local target.
 
 The required user-facing prompt is: "Static remediation is complete. You can optionally run CSReview Phase 9 Local DAST in a local test environment only. Never use this against production. If the test uses a database copy, make sure the copy was made deliberately, stored in a secure local place, and sanitized or minimized where needed. This resource is for White Hat Hacker-style analysis and remediation of security flaws; it sends real HTTP requests only to localhost/127.0.0.1 and writes a complementary report. Do you want me to run it? (yes/no)"
 
@@ -94,10 +101,10 @@ Phase 9 may proceed only when all of these are true:
 
 - The user gives explicit user confirmation.
 - The user understands this is for a local test environment, never production, and that any database copy used for testing must be securely created, stored, and handled.
-- The target URL is strictly `http://localhost:<port>`, `https://localhost:<port>`, `http://127.0.0.1:<port>`, or `https://127.0.0.1:<port>`.
-- `.env`, `.env.local`, and `.env.development` contain no external hosts for app services, APIs, databases, auth providers, BaaS endpoints, or storage endpoints. If any external host is found, abort Phase 9 and warn the user.
-- Redirects are not followed. If a response points to an external host, abort Phase 9 immediately.
-- The complementary reports are written only inside `csreview-reports/` as `csreview-reports/<agent>_local-dast-report.html` and `csreview-reports/<agent>_local-dast-findings.md`.
+- The target URL is strictly `http://localhost:<port>`, `https://localhost:<port>`, `http://127.0.0.1:<port>`, `https://127.0.0.1:<port>`, or the IPv6 loopback `http://[::1]:<port>` / `https://[::1]:<port>`.
+- The `.env`, `.env.local`, and `.env.development` pre-flight is advisory, not blocking: if an external host is referenced, it is surfaced as a `DAST-SUSPECTED` warning so you verify the local app under test does not proxy probe traffic to that host. A real development `.env` almost always references external services, so this warning by itself does not abort Phase 9; the hard guards below still apply.
+- Redirects are not followed. If a response points to an external host, abort Phase 9 immediately. (This is a hard guard enforced in the engine.)
+- The complementary reports are written only inside `csreview-reports/` as `csreview-reports/<agent>_local-dast-report.html` and `csreview-reports/<agent>_local-dast-findings.md`. A run ID is embedded in the report and, when provided, time-stamped history copies are also written inside `csreview-reports/` so re-running Phase 9 after remediation does not overwrite the previous run's evidence. A read-only per-backend local database dump guide (`<agent>_db-dump-guide.html`) is also generated to help prepare an isolated local copy before any database-level testing.
 
 The CLI form is:
 
@@ -113,7 +120,7 @@ Phase 9 output uses dynamic status labels:
 
 Hard limits: never probe external IPs, domains, staging, or production; never follow redirects to external hosts; never write outside `csreview-reports/`; never use destructive payloads; never use DELETE; do not send mutating POST/PUT/PATCH requests unless the user provided an explicit local test endpoint allowlist and confirmed the data mutation risk. The built-in CSReview local DAST mode is conservative and performs non-mutating HTTP checks such as reachability, browser security headers, and CORS behavior. OWASP ZAP or Nikto may be used only when installed, only after the same pre-flight checks and confirmation, and only against the confirmed local target.
 
-The analysis covers 8 default phases: Reconnaissance, Ultra-Deep Security, Database Security, SLSA 3 Supply Chain, OWASP ASVS, Compliance (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA), Vibe Coding Protection, and Dual Report Generation. Phase 9 is optional, local-only, post-remediation, and produces a complementary report.
+The analysis covers 8 default report sections: Reconnaissance, Ultra-Deep Security, Database Security, SLSA Build L3 (v1.2) Supply Chain, OWASP ASVS 5.0.0, Compliance mapping (LGPD/GDPR/SOC2/HIPAA/CCPA-CPRA — indicative correlation, not an audited compliance verification), Vibe Coding Protection, and Dual Report Generation. These are report sections, not separate executable engine phases. Phase 9 is optional, local-only, post-remediation, and produces a complementary report.
 
 CSReview includes built-in **Code Review** capabilities (equivalent to codex:review, codex:adversarial-review, code-review, requesting-code-review, receiving-code-review) - no additional skills or plugins required.
 
@@ -245,7 +252,7 @@ CSReview operates in three modes. These mode names are based on the deterministi
 - **WARNING**: This mode has lower precision and recall. Line-oriented regex checks can miss multiline issues and may report false positives.
 - Always clearly mark the run lower confidence and recommend installing Semgrep and OSV-Scanner before relying on the result.
 
-**Mode C: Hybrid (BEST)**
+**Mode C: Hybrid (PARTIAL)**
 - Some, but not all, relevant engine-orchestrated tools are available.
 - CSReview runs available parsed tools and supplements them with detector heuristics and agent review.
 - Tool findings are marked `TOOL-ONLY`; detector+tool agreement is deduplicated and promoted to `CONFIRMED`.
@@ -361,10 +368,6 @@ pnpm --version
 # yarn audit
 yarn --version
 # If found: yarn audit --json
-
-# pip-audit for Python
-pip-audit --version
-# If found: pip-audit --format json
 
 # dotnet list package --vulnerable (always available with dotnet)
 dotnet --version
@@ -1047,7 +1050,7 @@ Deep analysis of database structures, configurations, and access patterns across
 - Sensitive data in function arguments (logged)
 - Missing row-level security patterns
 
-### Phase 4: SLSA 3 Supply Chain Security
+### Phase 4: SLSA Build L3 (v1.2) Supply Chain Security
 
 Assess supply chain integrity against SLSA (Supply-chain Levels for Software Artifacts) framework.
 
@@ -1082,7 +1085,7 @@ Assess supply chain integrity against SLSA (Supply-chain Levels for Software Art
 
 ### Phase 5: OWASP ASVS Verification
 
-Systematic verification against OWASP Application Security Verification Standard (ASVS) 4.0.
+Systematic verification against OWASP Application Security Verification Standard (ASVS) 5.0.0 (stable since 2025-05-30). Reference requirements with the version, e.g. `v5.0.0-1.2.5`.
 
 #### V1: Architecture, Design and Threat Modeling
 - Threat model documented and up-to-date
@@ -1622,7 +1625,7 @@ const result = await db.query(query, [email, password]);
 | Artifact Signing | [PASS/FAIL] | Sigstore/cosign configured |
 
 **Current SLSA Level**: [0-3]
-**Recommendations**: [list of actions to reach SLSA 3]
+**Recommendations**: [list of actions to reach SLSA Build L3 (v1.2)]
 
 ---
 
@@ -1888,7 +1891,7 @@ When invoked, follow these steps:
 4. **Phase 1 - Recon**: Scan project structure, identify technologies, map attack surface
 5. **Phase 2 - Deep Analysis**: Systematically check each vulnerability category (injection, auth, data leakage, XSS, CSRF, config, deps, cloud, .NET, Delphi/Lazarus, Go, DLL/installer, platform-specific, logic flaws)
 6. **Phase 3 - Database Security**: Analyze SQL/NoSQL/BaaS database structures, access patterns, Firebase cost/performance, and configurations
-7. **Phase 4 - SLSA 3**: Assess supply chain integrity (source, build, dependency, deployment)
+7. **Phase 4 - SLSA Build L3 (v1.2)**: Assess supply chain integrity (source, build, dependency, deployment)
 8. **Phase 5 - OWASP ASVS**: Systematic verification against V1-V14 categories
 9. **Phase 6 - Compliance**: Check LGPD, GDPR, SOC 2, HIPAA, CCPA-CPRA requirements
 10. **Phase 7 - Vibe Coding**: Flag static heuristics for vulnerability patterns commonly seen in rushed or AI-assisted code
@@ -1911,7 +1914,7 @@ When invoked, follow these steps:
 - **Semgrep Required Baseline**: Always attempt to run `semgrep` (universal) and the language-specific primary tool for the project being analyzed. If Semgrep is missing, mark the run lower-confidence and provide installation commands.
 - **Dependency SCA Complement**: Run `pnpm audit --json` for Node.js roots with `pnpm-lock.yaml`, otherwise run `npm audit --json` for npm lockfiles. Also run `osv-scanner scan --format json <project_path>` when OSV-Scanner is installed. Never run dependency fix/update commands during CSReview.
 - **External Research Required When Uncertain**: If the agent is unsure about framework behavior, safe configuration, version-specific APIs, exploitability, or remediation, it MUST search external sources before making a confident claim. Use official framework documentation first, then vendor security advisories and specialized security sources such as OWASP, CWE, CVE/NVD, GitHub Security Advisories, OSV.dev, and Snyk. Do not guess.
-- **All Files Must Be Scanned**: When tools are available, ALL source files in the project MUST be scanned. When in Agent-Only mode, the agent MUST read and analyze every relevant source file - do not skip files or use sampling.
+- **All Relevant Files Are Scanned**: All relevant in-scope files are scanned; generated, vendor, minified, and IDE directories (e.g. `dist`, `build`, `vendor`, `bin`, `obj`, `.next`, `node_modules`, `.git`) and the generated reports are excluded. Do not rely on sampling for in-scope source.
 - **Never expose secrets in chat**: If you find hardcoded credentials, mention them in the reports only, not in the conversation
 - **Be thorough but practical**: Focus on exploitable vulnerabilities, not theoretical edge cases
 - **Provide actionable remediation**: Every finding must include concrete remediation guidance, but the fix is applied by the human developer or coding agent after reviewing context, not by CSReview.
@@ -1923,7 +1926,7 @@ When invoked, follow these steps:
 - **HTML report language**: Generate the HTML report in the same language as the user's conversation language
 - **MD report language**: Always generate the MD report in English regardless of user language (for agent consumption)
 - **Compliance findings**: Clearly map each compliance gap to the specific regulation article/section
-- **Vibe coding markers**: Tag findings with AI-Likelihood score to help users understand if vulnerability was likely AI-introduced
+- **Vibe coding markers**: Tag findings with a Vibe Risk boolean (Yes/No). This is a heuristic signal, not a numeric score and not proof of AI authorship.
 - **Database findings**: Include specific database engine version requirements when relevant
 - **SLSA scoring**: Clearly indicate current SLSA level and what's needed to reach level 3
 - **Unknown frameworks**: If the analyzed code uses a framework the agent is not familiar with (e.g., Lazarus, Delphi, niche frameworks), the agent MUST research using official documentation from the framework's official website, database vendor documentation, and community forums before reporting findings and suggesting fixes
@@ -1978,7 +1981,7 @@ CSReview exists to slow down unsafe "vibe coding" before release: it inspects lo
 
 ### Scope
 
-- **IN SCOPE**: the local development workspace/project, including local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is allowed only after remediation work, only with explicit user confirmation, and only against `localhost` or `127.0.0.1`.
+- **IN SCOPE**: the local development workspace/project, including local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is allowed only after remediation work, only with explicit user confirmation, and only against `localhost`, `127.0.0.1`, or the IPv6 loopback `[::1]`.
 - **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.

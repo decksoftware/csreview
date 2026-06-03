@@ -5,6 +5,63 @@ import { calculateSecurityScore, SEVERITY_WEIGHTS } from '../score.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
+/**
+ * Escape untrusted text for inline Markdown contexts (headings, list items,
+ * table cells). Finding fields can originate from Semgrep messages, dependency
+ * advisories, or scanned file paths, so they are treated as untrusted and must
+ * not be able to break tables, code spans, links, or inject raw HTML.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function escapeMdInline(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, ' ')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/([`*_[\]|])/g, '\\$1');
+}
+
+/**
+ * Render untrusted text as an inline code span that cannot break out of the
+ * span or a surrounding table cell. Backticks are stripped (paths/identifiers
+ * should not contain them) and pipes/newlines are neutralized.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function mdCodeSpan(value) {
+  const text = String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, ' ')
+    .replace(/`/g, '')
+    .replace(/\|/g, '\\|');
+  return `\`${text}\``;
+}
+
+/**
+ * Render a fenced code block whose fence is always longer than any backtick run
+ * inside the snippet, so attacker-controlled code (e.g. a Semgrep snippet that
+ * itself contains ```) can never break out of the block and inject Markdown.
+ *
+ * @param {unknown} code
+ * @param {string} [language]
+ * @returns {string}
+ */
+export function fencedCode(code, language = '') {
+  const text = String(code ?? '');
+  const runs = text.match(/`+/g) || [];
+  let longestRun = 0;
+  for (const run of runs) {
+    longestRun = Math.max(longestRun, run.length);
+  }
+  const fence = '`'.repeat(Math.max(3, longestRun + 1));
+  const safeLang = /^[a-z0-9+#.-]*$/i.test(String(language || '')) ? String(language || '') : '';
+  return `${fence}${safeLang}\n${text}\n${fence}`;
+}
+
 const EXTENSION_LANGUAGE_MAP = {
   '.js': 'javascript',
   '.mjs': 'javascript',
@@ -77,10 +134,12 @@ function getLanguageFromExtension(file) {
 }
 
 function getCweUrl(cwe) {
-  if (!cwe) return '';
-  const match = String(cwe).match(/CWE-(\d+)/i);
-  if (match) return `https://cwe.mitre.org/data/definitions/${match[1]}.html`;
-  return `https://cwe.mitre.org/data/definitions/${cwe}.html`;
+  // Only build a URL from a clean CWE id. Never interpolate an arbitrary value
+  // into the link target: a crafted `cwe` (e.g. from a subagent partial) such as
+  // `x)](http://evil.com)` would otherwise close the Markdown link early and
+  // inject an attacker-controlled live link into the report.
+  const match = String(cwe || '').match(/CWE-(\d+)/i);
+  return match ? `https://cwe.mitre.org/data/definitions/${match[1]}.html` : '';
 }
 
 function getOwaspUrl(owasp) {
@@ -135,12 +194,13 @@ function getRiskAssessment(findings, score) {
           findings.filter((f) => f.category === a).length >= findings.filter((f) => f.category === b).length ? a : b,
         )
       : 'None';
+  const safeTopCategory = escapeMdInline(topCategory);
 
   if (counts.CRITICAL > 0) {
-    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${topCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any release.`;
+    return `The application has a critical security posture with a score of ${score}/100. ${counts.CRITICAL} critical vulnerabilities were identified, primarily in ${safeTopCategory}. Immediate remediation is required to prevent potential exploitation. The most urgent issues should be addressed before any release.`;
   }
   if (counts.HIGH > 0) {
-    return `The application has a concerning security posture with a score of ${score}/100. ${counts.HIGH} high-severity vulnerabilities were found, with ${topCategory} being the most affected area. These issues should be prioritized in the next sprint cycle to reduce the attack surface.`;
+    return `The application has a concerning security posture with a score of ${score}/100. ${counts.HIGH} high-severity vulnerabilities were found, with ${safeTopCategory} being the most affected area. These issues should be prioritized in the next sprint cycle to reduce the attack surface.`;
   }
   if (counts.MEDIUM > 0) {
     return `The application has a moderate security posture with a score of ${score}/100. ${counts.MEDIUM} medium-severity findings were identified across ${categories.length} categories. While not immediately exploitable, these issues should be scheduled for remediation to improve overall security.`;
@@ -157,14 +217,14 @@ function getTopPriorityFixes(findings, limit = 5) {
 }
 
 function buildHeader(projectInfo, score, findings) {
-  const techStack = projectInfo.techStack?.join(', ') || 'Unknown';
-  const frameworks = projectInfo.frameworks?.join(', ') || 'None detected';
+  const techStack = escapeMdInline(projectInfo.techStack?.join(', ') || 'Unknown');
+  const frameworks = escapeMdInline(projectInfo.frameworks?.join(', ') || 'None detected');
   const date = new Date().toISOString();
 
   return `# CSReview Security Audit Report
 
-> **Project**: ${projectInfo.name}
-> **Type**: ${projectInfo.projectType || 'Unknown'}
+> **Project**: ${escapeMdInline(projectInfo.name)}
+> **Type**: ${escapeMdInline(projectInfo.projectType || 'Unknown')}
 > **Tech Stack**: ${techStack}
 > **Frameworks**: ${frameworks}
 > **Date**: ${date}
@@ -179,7 +239,11 @@ function buildExecutiveSummary(findings, score) {
 
   const topFixesList =
     topFixes.length > 0
-      ? topFixes.map((f, i) => `${i + 1}. **${f.name}** (${f.severity}) - \`${f.file}:${f.line}\``).join('\n')
+      ? topFixes
+          .map(
+            (f, i) => `${i + 1}. **${escapeMdInline(f.name)}** (${f.severity}) - ${mdCodeSpan(`${f.file}:${f.line}`)}`,
+          )
+          .join('\n')
       : 'No findings to prioritize.';
 
   return `## Executive Summary
@@ -206,7 +270,7 @@ function buildFindingsIndex(findings) {
   const rows = sorted
     .map(
       (f) =>
-        `| ${f.id} | ${f.severity} | ${f.category} | ${f.cwe || 'N/A'} | \`${f.file}\` | ${f.line} | ${f.name} | ${f.confidence || 'N/A'} |`,
+        `| ${escapeMdInline(f.id)} | ${f.severity} | ${escapeMdInline(f.category)} | ${escapeMdInline(f.cwe || 'N/A')} | ${mdCodeSpan(f.file)} | ${f.line} | ${escapeMdInline(f.name)} | ${escapeMdInline(f.confidence || 'N/A')} |`,
     )
     .join('\n');
 
@@ -222,41 +286,43 @@ function buildDetailedFindings(findings) {
 
   const sections = sorted.map((f) => {
     const lang = getLanguageFromExtension(f.file);
-    const cweLink = f.cwe ? `[${f.cwe}](${getCweUrl(f.cwe)})` : 'N/A';
+    const cweLink = f.cwe ? `[${escapeMdInline(f.cwe)}](${getCweUrl(f.cwe)})` : 'N/A';
     const owaspCode = f.owasp || OWASP_CATEGORY_MAP[f.category] || '';
-    const owaspLink = owaspCode ? `[${owaspCode}](${getOwaspUrl(owaspCode)})` : 'N/A';
+    const owaspLink = owaspCode ? `[${escapeMdInline(owaspCode)}](${getOwaspUrl(owaspCode)})` : 'N/A';
     const vibeRiskText = f.vibeRisk ? 'Yes' : 'No';
-    const complianceText = f.compliance || 'None specified';
-    const exploitationText = f.exploitation || 'No potential exploitation path provided.';
+    const complianceText = escapeMdInline(f.compliance || 'None specified');
+    const exploitationText = escapeMdInline(f.exploitation || 'No potential exploitation path provided.');
     const references =
-      f.references && f.references.length > 0 ? f.references.map((r) => `- ${r}`).join('\n') : `- ${getCweUrl(f.cwe)}`;
+      f.references && f.references.length > 0
+        ? f.references
+            .map((r) => `- ${escapeMdInline(typeof r === 'string' ? r : r?.url || r?.advisory || '')}`)
+            .join('\n')
+        : `- ${getCweUrl(f.cwe)}`;
 
     return `---
 
-### [${f.id}] ${f.name}
+### [${escapeMdInline(f.id)}] ${escapeMdInline(f.name)}
 
 **Severity**: ${f.severity}
-**Category**: ${f.category}
+**Category**: ${escapeMdInline(f.category)}
 **CWE**: ${cweLink}
 **OWASP**: ${owaspLink}
-**Confidence**: ${f.confidence || 'N/A'}
+**Confidence**: ${escapeMdInline(f.confidence || 'N/A')}
 **Vibe Coding Risk**: ${vibeRiskText}
 **Compliance**: ${complianceText}
 
 #### Location
 
-- **File**: \`${f.file}\`
+- **File**: ${mdCodeSpan(f.file)}
 - **Line**: ${f.line}
 
 #### Description
 
-${f.description}
+${escapeMdInline(f.description)}
 
 #### Vulnerable Code
 
-\`\`\`${lang}
-${f.vulnerableCode || 'No code snippet available.'}
-\`\`\`
+${fencedCode(f.vulnerableCode || 'No code snippet available.', lang)}
 
 #### Potential Exploitation Path (theoretical)
 
@@ -266,9 +332,7 @@ ${exploitationText}
 
 #### Recommended Fix
 
-\`\`\`${lang}
-${f.fix || 'No fix recommendation provided.'}
-\`\`\`
+${fencedCode(f.fix || 'No fix recommendation provided.', lang)}
 
 #### References
 
@@ -301,15 +365,15 @@ No findings to categorize.`;
       .join(', ');
 
     const fileList = [...new Set(catFindings.map((f) => f.file))];
-    const filesAffected = fileList.map((f) => `\`${f}\``).join(', ');
+    const filesAffected = fileList.map((f) => mdCodeSpan(f)).join(', ');
 
-    return `### ${category}
+    return `### ${escapeMdInline(category)}
 
 **Total Findings**: ${catFindings.length}
 **Severity Breakdown**: ${severityBreakdown}
 **Files Affected**: ${filesAffected}
 
-${catFindings.map((f) => `- **${f.id}** (${f.severity}): ${f.name} in \`${f.file}:${f.line}\``).join('\n')}`;
+${catFindings.map((f) => `- **${escapeMdInline(f.id)}** (${f.severity}): ${escapeMdInline(f.name)} in ${mdCodeSpan(`${f.file}:${f.line}`)}`).join('\n')}`;
   });
 
   return `## Category Analysis
@@ -350,25 +414,27 @@ function buildComplianceMapping(findings) {
     Object.keys(owaspMap).length > 0
       ? Object.entries(owaspMap)
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([code, ids]) => `| ${code} | FAIL | ${ids.join(', ')} |`)
+          .map(([code, ids]) => `| ${escapeMdInline(code)} | FAIL | ${ids.map(escapeMdInline).join(', ')} |`)
           .join('\n')
       : '| - | PASS | No findings mapped |';
 
   const gdprRows =
     gdprFindings.length > 0
-      ? gdprFindings.map((f) => `| Art.32 | ${f.severity} | ${f.id} |`).join('\n')
+      ? gdprFindings.map((f) => `| Art.32 | ${f.severity} | ${escapeMdInline(f.id)} |`).join('\n')
       : hasDataExposure
         ? '| Art.32 | MEDIUM | General risk |'
         : '| Art.32 | PASS | No findings mapped |';
 
   const lgpdRows =
     lgpdFindings.length > 0
-      ? lgpdFindings.map((f) => `| Art.46 | ${f.severity} | ${f.id} |`).join('\n')
+      ? lgpdFindings.map((f) => `| Art.46 | ${f.severity} | ${escapeMdInline(f.id)} |`).join('\n')
       : hasDataExposure
         ? '| Art.46 | MEDIUM | General risk |'
         : '| Art.46 | PASS | No findings mapped |';
 
   return `## Compliance Impact
+
+> Indicative correlation derived from CWE/category mappings, not an audited compliance verification.
 
 ### OWASP ASVS
 
@@ -413,12 +479,19 @@ function getImpactSummary(finding) {
 function getFixSummary(finding) {
   if (!fixAvailable(finding)) return 'Review and apply appropriate remediation';
   const fix = finding.fix;
-  if (fix.length <= 80) return fix;
-  return fix.split('\n')[0].substring(0, 80) + '...';
+  if (fix.length <= 80) return escapeMdInline(fix);
+  return escapeMdInline(fix.split('\n')[0].substring(0, 80) + '...');
 }
 
 function fixAvailable(finding) {
   return finding.fix && finding.fix.trim().length > 0;
+}
+
+function buildPriorityLine(f, i) {
+  return `${i + 1}. **${escapeMdInline(f.id)}** - ${escapeMdInline(f.name)} in ${mdCodeSpan(`${f.file}:${f.line}`)}
+   - Impact: ${getImpactSummary(f)}
+   - Effort: ${estimateEffort(f)}
+   - Fix: ${getFixSummary(f)}`;
 }
 
 function buildFixPriorityOrder(findings) {
@@ -434,45 +507,25 @@ function buildFixPriorityOrder(findings) {
   if (grouped.CRITICAL.length > 0) {
     sections.push(`### Immediate (CRITICAL)
 
-${grouped.CRITICAL.map(
-  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
-   - Impact: ${getImpactSummary(f)}
-   - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`,
-).join('\n')}`);
+${grouped.CRITICAL.map(buildPriorityLine).join('\n')}`);
   }
 
   if (grouped.HIGH.length > 0) {
     sections.push(`### Short-term (HIGH)
 
-${grouped.HIGH.map(
-  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
-   - Impact: ${getImpactSummary(f)}
-   - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`,
-).join('\n')}`);
+${grouped.HIGH.map(buildPriorityLine).join('\n')}`);
   }
 
   if (grouped.MEDIUM.length > 0) {
     sections.push(`### Medium-term (MEDIUM)
 
-${grouped.MEDIUM.map(
-  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
-   - Impact: ${getImpactSummary(f)}
-   - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`,
-).join('\n')}`);
+${grouped.MEDIUM.map(buildPriorityLine).join('\n')}`);
   }
 
   if (grouped.LOW.length > 0) {
     sections.push(`### Low Priority (LOW/INFO)
 
-${grouped.LOW.map(
-  (f, i) => `${i + 1}. **${f.id}** - ${f.name} in \`${f.file}:${f.line}\`
-   - Impact: ${getImpactSummary(f)}
-   - Effort: ${estimateEffort(f)}
-   - Fix: ${getFixSummary(f)}`,
-).join('\n')}`);
+${grouped.LOW.map(buildPriorityLine).join('\n')}`);
   }
 
   if (sections.length === 0) {
@@ -499,21 +552,15 @@ function buildAgentInstructions(findings) {
     const lang = getLanguageFromExtension(f.file);
     const hasFix = fixAvailable(f);
 
-    const beforeBlock = f.vulnerableCode
-      ? `\`\`\`${lang}
-${f.vulnerableCode}
-\`\`\``
-      : 'No vulnerable code snippet available.';
+    const beforeBlock = f.vulnerableCode ? fencedCode(f.vulnerableCode, lang) : 'No vulnerable code snippet available.';
 
     const afterBlock = hasFix
-      ? `\`\`\`text
-${f.fix}
-\`\`\``
+      ? fencedCode(f.fix, 'text')
       : 'No remediation hint available. Manual security review required.';
 
-    return `### Finding ${f.id}: ${f.name}
+    return `### Finding ${escapeMdInline(f.id)}: ${escapeMdInline(f.name)}
 
-**File**: \`${f.file}\`
+**File**: ${mdCodeSpan(f.file)}
 **Line**: ${f.line}
 **Severity**: ${f.severity}
 **Action**: Review the vulnerable code and validate the remediation approach against the project context, framework, schema, and tests before making any code change.
@@ -543,15 +590,15 @@ function buildToolMetadata(toolResults) {
   const packageAudit = toolResults.packageAudit || toolResults.npmAudit || {};
   const osvScanner = toolResults.osvScanner || {};
   const semgrepStatus = semgrep.available
-    ? `available (${semgrep.version || 'version unknown'}), ${semgrep.rawCount || semgrep.findings?.length || 0} findings`
-    : `not available${semgrep.error ? ` (${semgrep.error})` : ''}`;
-  const packageAuditLabel = packageAudit.tool || 'package audit';
+    ? `available (${escapeMdInline(semgrep.version || 'version unknown')}), ${semgrep.rawCount || semgrep.findings?.length || 0} findings`
+    : `not available${semgrep.error ? ` (${escapeMdInline(semgrep.error)})` : ''}`;
+  const packageAuditLabel = escapeMdInline(packageAudit.tool || 'package audit');
   const packageAuditStatus = packageAudit.available
-    ? `${packageAuditLabel} available (${packageAudit.version || 'version unknown'}), ${packageAudit.rawCount || packageAudit.findings?.length || 0} findings`
-    : `not run${packageAudit.reason ? ` (${packageAudit.reason})` : packageAudit.error ? ` (${packageAudit.error})` : ''}`;
+    ? `${packageAuditLabel} available (${escapeMdInline(packageAudit.version || 'version unknown')}), ${packageAudit.rawCount || packageAudit.findings?.length || 0} findings`
+    : `not run${packageAudit.reason ? ` (${escapeMdInline(packageAudit.reason)})` : packageAudit.error ? ` (${escapeMdInline(packageAudit.error)})` : ''}`;
   const osvScannerStatus = osvScanner.available
-    ? `available (${osvScanner.version || 'version unknown'}), ${osvScanner.rawCount || osvScanner.findings?.length || 0} findings`
-    : `not available${osvScanner.error ? ` (${osvScanner.error})` : ''}`;
+    ? `available (${escapeMdInline(osvScanner.version || 'version unknown')}), ${osvScanner.rawCount || osvScanner.findings?.length || 0} findings`
+    : `not available${osvScanner.error ? ` (${escapeMdInline(osvScanner.error)})` : ''}`;
   const semgrepInstall = semgrep.available
     ? ''
     : '\n- **Install Semgrep**: `pipx install semgrep`, `uv tool install semgrep`, or `brew install semgrep`, then verify with `semgrep --version`';
@@ -559,7 +606,7 @@ function buildToolMetadata(toolResults) {
     ? ''
     : '\n- **Install OSV-Scanner**: `winget install Google.OSVScanner`, `brew install osv-scanner`, or `go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest`, then verify with `osv-scanner --version`';
 
-  return `- **Analysis Mode**: ${toolResults.mode || 'Agent-Only'}
+  return `- **Analysis Mode**: ${escapeMdInline(toolResults.mode || 'Agent-Only')}
 - **Semgrep Required**: Yes
 - **Semgrep Status**: ${semgrepStatus}
 - **Package Audit Status**: ${packageAuditStatus}
@@ -583,7 +630,7 @@ function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {
 
   return `## Scan Metadata
 
-- **Scanner**: CSReview v${scannerVersion}
+- **Scanner**: CSReview v${escapeMdInline(scannerVersion)}
 - **Files Scanned**: ${filesCount}
 - **Config Files**: ${configCount}
 ${buildToolMetadata(metadata.toolResults)}

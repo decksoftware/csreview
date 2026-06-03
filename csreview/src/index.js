@@ -7,8 +7,11 @@ import { scanProject } from './scanner.js';
 import { detectVulnerabilities } from './detector.js';
 import { generateHtmlReport } from './reports/html.js';
 import { generateMarkdownReport } from './reports/markdown.js';
+import { generateSarifReport } from './reports/sarif.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
+import { loadIgnore, applyIgnore } from './ignore.js';
+import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 
 /**
  * Canonical finding object exchanged by the deterministic engine, tool
@@ -62,7 +65,7 @@ import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
-const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'osv-scanner', 'python3', 'python']);
+const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'bun', 'osv-scanner', 'python3', 'python']);
 const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
 
 function executable(command) {
@@ -183,10 +186,13 @@ function getLanguage(filePath) {
   return LANG_MAP[ext] || 'unknown';
 }
 
-function enrichFiles(filePaths) {
-  return filePaths.map((fp) => ({
+function enrichFiles(projectInfo) {
+  const configSet = new Set(projectInfo.configFiles || []);
+  const baasSet = new Set(projectInfo.baasFiles || []);
+  return uniqueAuditFiles(projectInfo).map((fp) => ({
     path: fp,
     language: getLanguage(fp),
+    kind: baasSet.has(fp) ? 'baas' : configSet.has(fp) ? 'config' : 'source',
   }));
 }
 
@@ -298,7 +304,7 @@ const PARTIAL_REQUIRED_FIELDS = [
   'source',
 ];
 const PARTIAL_TOOL_FIELDS = ['toolExecutions', 'toolRuns', 'toolsExecuted', 'executedTools'];
-const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'osv-scanner', 'trivy']);
+const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'bun audit', 'osv-scanner', 'trivy']);
 
 function normalizeKeyPart(value) {
   return String(value || '')
@@ -414,6 +420,7 @@ function normalizeToolName(entry) {
   if (!value) return '';
   if (value === 'npm' || value === 'npm audit' || value.includes('npm audit')) return 'npm audit';
   if (value === 'pnpm' || value === 'pnpm audit' || value.includes('pnpm audit')) return 'pnpm audit';
+  if (value === 'bun' || value === 'bun audit' || value.includes('bun audit')) return 'bun audit';
   if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner'))
     return 'osv-scanner';
   if (value.includes('semgrep')) return 'semgrep';
@@ -587,17 +594,19 @@ export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
   return result;
 }
 
-function normalizeSemgrepSeverity(severity) {
-  if (severity === 'ERROR') return 'HIGH';
+function normalizeSemgrepSeverity(extra) {
+  const severity = extra?.severity;
+  const impact = String(extra?.metadata?.impact || '').toUpperCase();
+  if (severity === 'ERROR') return impact === 'HIGH' ? 'CRITICAL' : 'HIGH';
   if (severity === 'WARNING') return 'MEDIUM';
   return 'LOW';
 }
 
-function normalizeSemgrepFinding(result, index) {
+export function normalizeSemgrepFinding(result, index) {
   const cwe = result.extra?.metadata?.cwe?.[0]?.match(/CWE-\d+/)?.[0] || 'N/A';
   return {
     id: `SEMGREP_${index + 1}`,
-    severity: normalizeSemgrepSeverity(result.extra?.severity),
+    severity: normalizeSemgrepSeverity(result.extra),
     category: result.extra?.metadata?.vulnerability_class?.[0] || 'Semgrep',
     name: result.extra?.message || result.check_id,
     description: result.extra?.message || 'Semgrep finding.',
@@ -651,7 +660,8 @@ function splitReferenceLines(value) {
  * @returns {Finding[]}
  */
 export function normalizeNpmAuditFindings(auditJson = {}) {
-  const vulnerabilities = auditJson.vulnerabilities || {};
+  if (!isPlainObject(auditJson)) return [];
+  const vulnerabilities = isPlainObject(auditJson.vulnerabilities) ? auditJson.vulnerabilities : {};
   return Object.values(vulnerabilities).map((vulnerability, index) => {
     const advisory = firstAuditAdvisory(vulnerability);
     const cwe = Array.isArray(advisory.cwe) ? advisory.cwe[0] : 'N/A';
@@ -683,6 +693,25 @@ export function normalizeNpmAuditFindings(auditJson = {}) {
   });
 }
 
+/**
+ * Normalize `bun audit --json` output (npm-audit-compatible schema) into
+ * canonical dependency findings.
+ *
+ * @param {object} auditJson
+ * @param {string} [lockfile]
+ * @returns {Finding[]}
+ */
+export function normalizeBunAuditFindings(auditJson = {}, lockfile = 'bun.lock') {
+  return normalizeNpmAuditFindings(auditJson).map((finding, index) => ({
+    ...finding,
+    id: `BUN_AUDIT_${index + 1}`,
+    name: finding.name.replace(/^npm audit:/, 'bun audit:'),
+    file: lockfile,
+    compliance: 'Known vulnerable dependency reported by bun audit',
+    source: 'bun-audit',
+  }));
+}
+
 function formatPnpmFix(advisory) {
   if (advisory.recommendation) {
     return `Review ${advisory.module_name}; ${advisory.recommendation}. Validate the update against the project lockfile and tests before applying it.`;
@@ -700,7 +729,8 @@ function formatPnpmFix(advisory) {
  * @returns {Finding[]}
  */
 export function normalizePnpmAuditFindings(auditJson = {}) {
-  const advisories = auditJson.advisories || {};
+  if (!isPlainObject(auditJson)) return [];
+  const advisories = isPlainObject(auditJson.advisories) ? auditJson.advisories : {};
   return Object.values(advisories).map((advisory, index) => {
     const firstFinding = Array.isArray(advisory.findings) ? advisory.findings[0] || {} : {};
     const paths = Array.isArray(firstFinding.paths) ? firstFinding.paths.join(', ') : 'dependency tree';
@@ -763,7 +793,8 @@ function normalizeSourcePath(sourcePath, rootDir) {
  */
 export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd()) {
   const findings = [];
-  for (const result of osvJson.results || []) {
+  if (!isPlainObject(osvJson) || !Array.isArray(osvJson.results)) return findings;
+  for (const result of osvJson.results) {
     const sourcePath = normalizeSourcePath(result.source?.path, rootDir);
     for (const pkg of result.packages || []) {
       const pkgInfo = pkg.package || {};
@@ -895,6 +926,18 @@ export function detectNodeAuditStrategy(rootDir) {
     };
   }
 
+  if (hasLockfile('bun.lockb') || hasLockfile('bun.lock')) {
+    return {
+      command: 'bun',
+      args: ['audit', '--json'],
+      versionArgs: ['--version'],
+      label: 'bun audit',
+      manager: 'bun',
+      lockfile: hasLockfile('bun.lockb') ? 'bun.lockb' : 'bun.lock',
+      source: 'bun-audit',
+    };
+  }
+
   if (hasLockfile(lockfiles.yarn)) {
     return {
       skipped: true,
@@ -947,8 +990,14 @@ async function runPackageAudit(rootDir) {
       if (!stdout) throw err;
     }
     const parsed = JSON.parse(stdout || '{}');
-    const findings =
-      strategy.source === 'pnpm-audit' ? normalizePnpmAuditFindings(parsed) : normalizeNpmAuditFindings(parsed);
+    let findings;
+    if (strategy.source === 'pnpm-audit') {
+      findings = normalizePnpmAuditFindings(parsed);
+    } else if (strategy.source === 'bun-audit') {
+      findings = normalizeBunAuditFindings(parsed, strategy.lockfile);
+    } else {
+      findings = normalizeNpmAuditFindings(parsed);
+    }
     return {
       available: true,
       required: false,
@@ -1113,7 +1162,7 @@ export function classifyToolMode(toolResults = {}) {
  * Run a full CSReview static analysis and write reports.
  *
  * @param {string} rootDir
- * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string}} [options]
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string}} [options]
  */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
@@ -1125,7 +1174,7 @@ export async function runAnalysis(rootDir, options = {}) {
 
   const projectInfo = await scanProject(absRoot);
 
-  const enrichedFiles = enrichFiles(uniqueAuditFiles(projectInfo));
+  const enrichedFiles = enrichFiles(projectInfo);
 
   const detectorInput = {
     ...projectInfo,
@@ -1145,7 +1194,28 @@ export async function runAnalysis(rootDir, options = {}) {
     strict: Boolean(options.strictPartials),
   });
 
-  const score = calculateSecurityScore(findings, projectInfo);
+  // Report-level suppression: .csreview-ignore (path globs) then --baseline
+  // (known-finding fingerprints). Both are read-only and only filter the
+  // reported set; subagent reconciliation above runs on the full deduped set.
+  const ignore = loadIgnore(absRoot);
+  const ignoreResult = applyIgnore(findings, ignore.compiled);
+  let reportFindings = ignoreResult.kept;
+
+  /** @type {{applied: boolean, baselinedCount: number, written: string|null}} */
+  const baselineInfo = { applied: false, baselinedCount: 0, written: null };
+  if (options.updateBaselinePath) {
+    const target = normalizeLocalPath(options.updateBaselinePath);
+    writeBaseline(target, reportFindings);
+    baselineInfo.written = target;
+  } else if (options.baselinePath) {
+    const baselineSet = loadBaseline(normalizeLocalPath(options.baselinePath));
+    const baselineApplied = applyBaseline(reportFindings, baselineSet);
+    baselineInfo.applied = true;
+    baselineInfo.baselinedCount = baselineApplied.baselined.length;
+    reportFindings = baselineApplied.newFindings;
+  }
+
+  const score = calculateSecurityScore(reportFindings, projectInfo);
 
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
@@ -1153,21 +1223,23 @@ export async function runAnalysis(rootDir, options = {}) {
 
   const htmlPath = safeResolveInside(outputDir, `${agentName}_security-report.html`);
   const mdPath = safeResolveInside(outputDir, `${agentName}_security-findings.md`);
-  if (!htmlPath || !mdPath) {
+  const sarifPath = safeResolveInside(outputDir, `${agentName}_security.sarif`);
+  if (!htmlPath || !mdPath || !sarifPath) {
     throw new Error('Unable to resolve report output paths safely.');
   }
 
-  generateHtmlReport(projectInfo, findings, htmlPath, { toolResults, partialReconciliation });
-  generateMarkdownReport(projectInfo, findings, mdPath, {
+  generateHtmlReport(projectInfo, reportFindings, htmlPath, { toolResults, partialReconciliation });
+  generateMarkdownReport(projectInfo, reportFindings, mdPath, {
     toolResults,
     partialReconciliation,
     analysisStartTime: startTime,
   });
+  generateSarifReport(projectInfo, reportFindings, sarifPath);
 
   const duration = Date.now() - startTime;
 
   const severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
-  for (const f of findings) {
+  for (const f of reportFindings) {
     if (severityCounts[f.severity] !== undefined) {
       severityCounts[f.severity]++;
     }
@@ -1177,7 +1249,9 @@ export async function runAnalysis(rootDir, options = {}) {
     project: projectInfo.name,
     root: absRoot,
     score,
-    totalFindings: findings.length,
+    totalFindings: reportFindings.length,
+    suppressedByIgnore: ignoreResult.suppressed.length,
+    baseline: baselineInfo,
     severityCounts,
     filesScanned: projectInfo.files.length,
     configFiles: projectInfo.configFiles.length,
@@ -1186,10 +1260,10 @@ export async function runAnalysis(rootDir, options = {}) {
     frameworks: projectInfo.frameworks,
     projectType: projectInfo.projectType,
     techStack: projectInfo.techStack,
-    reports: { html: htmlPath, markdown: mdPath },
+    reports: { html: htmlPath, markdown: mdPath, sarif: sarifPath },
     toolResults,
     partialReconciliation,
     duration: formatDuration(duration),
-    findings,
+    findings: reportFindings,
   };
 }

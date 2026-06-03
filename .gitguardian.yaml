@@ -1,0 +1,11 @@
+version: 2
+
+# CSReview is a security scanner, so its test corpus and detector test fixtures
+# intentionally contain fake/example credentials (e.g. AWS's canonical
+# documentation key) used to verify detection. These are not real secrets.
+secret:
+  ignored-paths:
+    - 'csreview/test/**'
+  ignored-matches:
+    - name: AWS documentation example access key (not a real credential)
+      match: AKIAIOSFODNN7EXAMPLE
