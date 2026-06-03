@@ -75,7 +75,7 @@ test('Markdown report escapes attacker-controlled finding fields', () => {
   const md = fs.readFileSync(out, 'utf8');
 
   // Inline HTML neutralized in name/description (code block contains no HTML here).
-  assert.doesNotMatch(md, /<script>/);
+  assert.doesNotMatch(md, /<script>/i);
   assert.doesNotMatch(md, /<img /);
   assert.match(md, /&lt;script&gt;/);
   // Pipe in name escaped so the findings-index table is not broken.
