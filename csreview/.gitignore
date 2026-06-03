@@ -1,5 +1,6 @@
 # Arquivos gerados pelo CSReview
 csreview-reports/
+.csreview/
 *_security-report.html
 *_security-findings.md
 security-report.html

@@ -95,6 +95,7 @@ const IGNORE_PATTERNS = [
   '**/*_security-report.html',
   '**/*_security-findings.md',
   '**/csreview-reports/**',
+  '**/.csreview/**',
 ];
 
 const EXTENSION_TO_TECH = {
