@@ -283,21 +283,76 @@ test('local DAST rejects non-local targets and aborts before requests', async ()
   assert.equal(fetchImpl.calls.length, 0);
 });
 
-test('local DAST aborts when development env files reference external hosts', async () => {
+test('local DAST warns (not aborts) when env files reference external hosts', async () => {
   const root = makeTempProject();
   const fetchImpl = createFakeDastFetch();
   writeFile(root, '.env.local', 'API_URL=https://api.example.com\nLOCAL_URL=http://localhost:3000\n');
+
+  // A real dev .env almost always references external hosts; that must NOT block Phase 9.
+  // The hard guards remain: target is localhost and redirects to external hosts still abort.
+  const result = await runLocalDast(root, {
+    targetUrl: 'http://localhost:3000',
+    confirmed: true,
+    outputDir: path.join(root, 'csreview-reports'),
+    fetchImpl,
+  });
+
+  assert.ok(fetchImpl.calls.length > 0, 'the local probe should still run');
+  const envWarning = result.results.find((item) => item.id.startsWith('DAST-ENV'));
+  assert.ok(envWarning, 'expected a non-blocking DAST-ENV warning');
+  assert.match(envWarning.response, /api\.example\.com/);
+  assert.ok(result.envWarnings.some((w) => w.host === 'api.example.com'));
+});
+
+test('local DAST accepts the IPv6 loopback [::1]', async () => {
+  const root = makeTempProject();
+  const fetchImpl = createFakeDastFetch();
+
+  const result = await runLocalDast(root, {
+    targetUrl: 'http://[::1]:3000',
+    confirmed: true,
+    outputDir: path.join(root, 'csreview-reports'),
+    fetchImpl,
+  });
+
+  assert.equal(result.target, 'http://[::1]:3000/');
+  assert.ok(fetchImpl.calls.length > 0);
+});
+
+test('local DAST aborts when the local target redirects to an external host', async () => {
+  const root = makeTempProject();
+  const redirectFetch = async () => ({
+    status: 302,
+    headers: new Map([['location', 'https://evil.com/']]),
+  });
 
   await assert.rejects(
     () =>
       runLocalDast(root, {
         targetUrl: 'http://localhost:3000',
         confirmed: true,
-        fetchImpl,
+        outputDir: path.join(root, 'csreview-reports'),
+        fetchImpl: redirectFetch,
       }),
-    /external host.*api\.example\.com/i,
+    /redirected to external host/i,
   );
-  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test('local DAST tolerates a redirect to a local path', async () => {
+  const root = makeTempProject();
+  const localRedirectFetch = async () => ({
+    status: 302,
+    headers: new Map([['location', '/login']]),
+  });
+
+  const result = await runLocalDast(root, {
+    targetUrl: 'http://localhost:3000',
+    confirmed: true,
+    outputDir: path.join(root, 'csreview-reports'),
+    fetchImpl: localRedirectFetch,
+  });
+
+  assert.ok(result.results.length >= 2);
 });
 
 test('local DAST writes complementary reports with commands and dynamic statuses', async () => {

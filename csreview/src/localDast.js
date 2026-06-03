@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
+// Node's URL parser returns the bracketed form for IPv6 loopback (e.g. new URL('http://[::1]').hostname === '[::1]').
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const PREFLIGHT_ENV_FILES = ['.env', '.env.local', '.env.development'];
 const SECURITY_HEADERS = [
   'content-security-policy',
@@ -78,8 +79,13 @@ function extractAssignedHost(line) {
   return null;
 }
 
+// Pre-flight is advisory, not blocking: a real dev .env almost always references external
+// hosts (DB, auth, storage). Blocking on that would make Phase 9 unusable. The hard guards
+// are elsewhere: the target must be localhost/127.0.0.1 (validateTargetUrl) and responses
+// must not redirect to external hosts (assertNoExternalRedirect). Here we only WARN.
 function runEnvPreflight(rootDir) {
   const scanned = [];
+  const warnings = [];
   for (const envFile of PREFLIGHT_ENV_FILES) {
     const envPath = safeResolveInside(rootDir, envFile);
     if (!envPath || !fs.existsSync(envPath)) continue;
@@ -88,19 +94,18 @@ function runEnvPreflight(rootDir) {
 
     for (const url of extractUrls(content)) {
       if (!isLocalUrl(url)) {
-        const host = new URL(url).hostname;
-        throw new Error(`abort Phase 9: ${envFile} references external host ${host}.`);
+        warnings.push({ file: envFile, host: new URL(url).hostname });
       }
     }
 
     for (const line of content.split(/\r?\n/)) {
       const assignedHost = extractAssignedHost(line);
       if (assignedHost) {
-        throw new Error(`abort Phase 9: ${envFile} references external host ${assignedHost}.`);
+        warnings.push({ file: envFile, host: assignedHost });
       }
     }
   }
-  return scanned;
+  return { scanned, warnings };
 }
 
 function headersToObject(headers) {
@@ -295,6 +300,22 @@ ${cards}
 </html>`;
 }
 
+function buildEnvWarningResult(targetUrl, warning, index) {
+  return {
+    id: `DAST-ENV-${index + 1}`,
+    status: 'DAST-SUSPECTED',
+    severity: 'LOW',
+    name: 'Local .env references an external host',
+    category: 'Dynamic Analysis (DAST)',
+    target: targetUrl.href,
+    command: `grep -iE "host|url|uri|endpoint" ${warning.file}`,
+    response: `${warning.file} references ${warning.host}`,
+    description: `${warning.file} references external host ${warning.host}. Phase 9 still probes only the confirmed local target and never follows redirects to external hosts, but verify your local app does not proxy DAST traffic to this host during the test.`,
+    recommendation:
+      'Use a local test database/copy and local service stubs so the app under test does not reach external/production endpoints while you run the probe.',
+  };
+}
+
 export async function runLocalDast(rootDir, options = {}) {
   if (options.confirmed !== true) {
     throw new Error('Local DAST requires explicit confirmation because it sends real HTTP requests.');
@@ -302,7 +323,7 @@ export async function runLocalDast(rootDir, options = {}) {
 
   const absRoot = normalizeLocalPath(rootDir);
   const targetUrl = validateTargetUrl(options.targetUrl);
-  const envFiles = runEnvPreflight(absRoot);
+  const { scanned: envFiles, warnings: envWarnings } = runEnvPreflight(absRoot);
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== 'function') {
     throw new Error('Local DAST requires a fetch implementation available in Node.js >=18.');
@@ -321,6 +342,9 @@ export async function runLocalDast(rootDir, options = {}) {
   const baseResponse = await fetchHead(fetchImpl, targetUrl);
   const corsResponse = await fetchHead(fetchImpl, targetUrl, { Origin: 'https://evil.com' });
   const results = [buildSecurityHeaderResult(targetUrl, baseResponse), buildCorsResult(targetUrl, corsResponse)];
+  for (const warning of envWarnings) {
+    results.push(buildEnvWarningResult(targetUrl, warning, results.length));
+  }
 
   const packageJsonPath = safeResolveInside(absRoot, 'package.json');
   const projectName =
@@ -340,6 +364,7 @@ export async function runLocalDast(rootDir, options = {}) {
   return {
     target: targetUrl.href,
     envFiles,
+    envWarnings,
     results,
     reports: {
       html: htmlPath,
