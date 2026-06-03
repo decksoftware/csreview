@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import chalk from 'chalk';
 import { checkExternalTools, runAnalysis } from './index.js';
 import { runLocalDast } from './localDast.js';
+import { DEFAULT_BASELINE_FILE } from './baseline.js';
 
 const args = process.argv.slice(2);
 
@@ -48,6 +49,8 @@ ${chalk.bold('OPTIONS:')}
   --local-dast-url <url> Run complementary local-only DAST against localhost/127.0.0.1
   --confirm-local-dast  Required confirmation flag for --local-dast-url
   --strict-partials     Fail when csreview-reports/.partials/ does not reconcile
+  --baseline <file>     Suppress findings already recorded in a baseline JSON file
+  --update-baseline     Write/refresh the baseline file from this run (with --baseline or default .csreview-baseline.json)
   --doctor              Check external security tools without scanning source code
   --help, -h            Show this help message
 
@@ -60,9 +63,13 @@ ${chalk.bold('EXAMPLES:')}
   csreview --doctor .
 
 ${chalk.bold('OUTPUT:')}
-  Generates two reports in the output directory:
+  Generates three reports in the output directory:
   - <agent>_security-report.html    - Human-readable HTML report with charts and navigation
   - <agent>_security-findings.md    - Machine-parseable Markdown for AI coding agents
+  - <agent>_security.sarif          - SARIF 2.1.0 for CI / GitHub code scanning
+
+  A .csreview-ignore file at the project root (gitignore-style globs) suppresses
+  findings for matching paths. It is read-only and never modifies your project.
 
   With --local-dast-url, also generates complementary local dynamic reports:
   - <agent>_local-dast-report.html
@@ -102,6 +109,14 @@ if (localDastIdx !== -1 && args[localDastIdx + 1]) {
 }
 const localDastConfirmed = args.includes('--confirm-local-dast');
 
+let baselinePath = null;
+const baselineIdx = args.findIndex((a) => a === '--baseline');
+if (baselineIdx !== -1 && args[baselineIdx + 1] && !args[baselineIdx + 1].startsWith('-')) {
+  baselinePath = resolve(args[baselineIdx + 1]);
+}
+const updateBaseline = args.includes('--update-baseline');
+const updateBaselinePath = updateBaseline ? baselinePath || resolve(targetDir, DEFAULT_BASELINE_FILE) : null;
+
 if (!existsSync(targetDir)) {
   console.error(chalk.red(`\n  Error: Directory not found: ${targetDir}\n`));
   process.exit(1);
@@ -113,7 +128,13 @@ console.log(chalk.gray(`  Output:  ${outputDir || resolve(targetDir, 'csreview-r
 console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
 
 try {
-  const result = await runAnalysis(targetDir, { outputDir, agentName, strictPartials });
+  const result = await runAnalysis(targetDir, {
+    outputDir,
+    agentName,
+    strictPartials,
+    baselinePath,
+    updateBaselinePath,
+  });
 
   console.log(chalk.bold('\n  ----------------------------------------\n'));
   console.log(chalk.bold('  Scan Complete\n'));
@@ -181,9 +202,20 @@ try {
     console.log(`  ${chalk.bold('Project Type:')} ${result.projectType}`);
   }
 
+  if (result.suppressedByIgnore > 0) {
+    console.log(`\n  ${chalk.gray(`Suppressed by .csreview-ignore: ${result.suppressedByIgnore}`)}`);
+  }
+  if (result.baseline?.applied) {
+    console.log(`  ${chalk.gray(`Baselined (known) findings hidden: ${result.baseline.baselinedCount}`)}`);
+  }
+  if (result.baseline?.written) {
+    console.log(`  ${chalk.green(`Baseline written: ${result.baseline.written}`)}`);
+  }
+
   console.log(chalk.bold('\n  Reports:\n'));
   console.log(`    ${chalk.cyan('HTML')}  ${result.reports.html}`);
   console.log(`    ${chalk.cyan('MD')}    ${result.reports.markdown}`);
+  console.log(`    ${chalk.cyan('SARIF')} ${result.reports.sarif}`);
 
   if (localDastUrl) {
     console.log(chalk.bold('\n  Running Local DAST Complement\n'));

@@ -10,6 +10,8 @@ import { generateMarkdownReport } from './reports/markdown.js';
 import { generateSarifReport } from './reports/sarif.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
+import { loadIgnore, applyIgnore } from './ignore.js';
+import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 
 /**
  * Canonical finding object exchanged by the deterministic engine, tool
@@ -1116,7 +1118,7 @@ export function classifyToolMode(toolResults = {}) {
  * Run a full CSReview static analysis and write reports.
  *
  * @param {string} rootDir
- * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string}} [options]
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string}} [options]
  */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
@@ -1148,7 +1150,28 @@ export async function runAnalysis(rootDir, options = {}) {
     strict: Boolean(options.strictPartials),
   });
 
-  const score = calculateSecurityScore(findings, projectInfo);
+  // Report-level suppression: .csreview-ignore (path globs) then --baseline
+  // (known-finding fingerprints). Both are read-only and only filter the
+  // reported set; subagent reconciliation above runs on the full deduped set.
+  const ignore = loadIgnore(absRoot);
+  const ignoreResult = applyIgnore(findings, ignore.compiled);
+  let reportFindings = ignoreResult.kept;
+
+  /** @type {{applied: boolean, baselinedCount: number, written: string|null}} */
+  const baselineInfo = { applied: false, baselinedCount: 0, written: null };
+  if (options.updateBaselinePath) {
+    const target = normalizeLocalPath(options.updateBaselinePath);
+    writeBaseline(target, reportFindings);
+    baselineInfo.written = target;
+  } else if (options.baselinePath) {
+    const baselineSet = loadBaseline(normalizeLocalPath(options.baselinePath));
+    const baselineApplied = applyBaseline(reportFindings, baselineSet);
+    baselineInfo.applied = true;
+    baselineInfo.baselinedCount = baselineApplied.baselined.length;
+    reportFindings = baselineApplied.newFindings;
+  }
+
+  const score = calculateSecurityScore(reportFindings, projectInfo);
 
   if (!existsSync(outputDir)) {
     mkdirSync(outputDir, { recursive: true });
@@ -1161,18 +1184,18 @@ export async function runAnalysis(rootDir, options = {}) {
     throw new Error('Unable to resolve report output paths safely.');
   }
 
-  generateHtmlReport(projectInfo, findings, htmlPath, { toolResults, partialReconciliation });
-  generateMarkdownReport(projectInfo, findings, mdPath, {
+  generateHtmlReport(projectInfo, reportFindings, htmlPath, { toolResults, partialReconciliation });
+  generateMarkdownReport(projectInfo, reportFindings, mdPath, {
     toolResults,
     partialReconciliation,
     analysisStartTime: startTime,
   });
-  generateSarifReport(projectInfo, findings, sarifPath);
+  generateSarifReport(projectInfo, reportFindings, sarifPath);
 
   const duration = Date.now() - startTime;
 
   const severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
-  for (const f of findings) {
+  for (const f of reportFindings) {
     if (severityCounts[f.severity] !== undefined) {
       severityCounts[f.severity]++;
     }
@@ -1182,7 +1205,9 @@ export async function runAnalysis(rootDir, options = {}) {
     project: projectInfo.name,
     root: absRoot,
     score,
-    totalFindings: findings.length,
+    totalFindings: reportFindings.length,
+    suppressedByIgnore: ignoreResult.suppressed.length,
+    baseline: baselineInfo,
     severityCounts,
     filesScanned: projectInfo.files.length,
     configFiles: projectInfo.configFiles.length,
@@ -1195,6 +1220,6 @@ export async function runAnalysis(rootDir, options = {}) {
     toolResults,
     partialReconciliation,
     duration: formatDuration(duration),
-    findings,
+    findings: reportFindings,
   };
 }
