@@ -922,23 +922,6 @@ const VULNERABILITY_PATTERNS = [
     references: ['https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html'],
   },
   {
-    id: 'UNSAFE_EVAL',
-    severity: 'CRITICAL',
-    category: 'Supply Chain',
-    name: 'Unsafe eval()/Function()',
-    description: 'eval() or Function() with dynamic input.',
-    regex: /(?:^|[^\w.])(?:eval|new\s+Function|Function)\s*\(\s*(?!['"](?:use strict)['"])/gi,
-    cwe: 'CWE-95',
-    owasp: 'A03:2021-Injection',
-    fix: 'Remove eval(). Use JSON.parse() or sandboxed VMs.',
-    exploitation: 'Attacker injects code with full server privileges.',
-    confidence: 'HIGH',
-    vibeRisk: true,
-    references: [
-      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval#never_use_eval!',
-    ],
-  },
-  {
     id: 'PROTOTYPE_POLLUTION',
     severity: 'CRITICAL',
     category: 'Supply Chain',
@@ -1364,8 +1347,17 @@ function hasSameLineRiskContext(pattern, line) {
   return true;
 }
 
-function shouldSuppressNoisyHeuristic(pattern, line) {
-  return SAME_LINE_CONTEXT_REQUIRED.has(pattern.id) && !hasSameLineRiskContext(pattern, line);
+const NON_SOURCE_PATH =
+  /(?:^|[\\/])(?:tests?|__tests__|fixtures?|examples?|docs?)(?:[\\/]|$)|\.(?:test|spec)\.[A-Za-z0-9]+$|\.md$/i;
+
+function isNonSourcePath(filePath) {
+  return NON_SOURCE_PATH.test(String(filePath || ''));
+}
+
+function shouldSuppressNoisyHeuristic(pattern, line, filePath) {
+  if (!SAME_LINE_CONTEXT_REQUIRED.has(pattern.id)) return false;
+  if (!hasSameLineRiskContext(pattern, line)) return true;
+  return isNonSourcePath(filePath);
 }
 
 function snippetAroundMatch(line, match, maxLength = 2000) {
@@ -1446,7 +1438,7 @@ function detectInContent(content, filePath, language) {
       pattern.regex.lastIndex = 0;
       let match;
       while ((match = pattern.regex.exec(line)) !== null) {
-        if (shouldSuppressNoisyHeuristic(pattern, line)) {
+        if (shouldSuppressNoisyHeuristic(pattern, line, filePath)) {
           if (!pattern.regex.global) break;
           continue;
         }

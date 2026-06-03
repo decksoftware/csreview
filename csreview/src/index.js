@@ -587,17 +587,19 @@ export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
   return result;
 }
 
-function normalizeSemgrepSeverity(severity) {
-  if (severity === 'ERROR') return 'HIGH';
+function normalizeSemgrepSeverity(extra) {
+  const severity = extra?.severity;
+  const impact = String(extra?.metadata?.impact || '').toUpperCase();
+  if (severity === 'ERROR') return impact === 'HIGH' ? 'CRITICAL' : 'HIGH';
   if (severity === 'WARNING') return 'MEDIUM';
   return 'LOW';
 }
 
-function normalizeSemgrepFinding(result, index) {
+export function normalizeSemgrepFinding(result, index) {
   const cwe = result.extra?.metadata?.cwe?.[0]?.match(/CWE-\d+/)?.[0] || 'N/A';
   return {
     id: `SEMGREP_${index + 1}`,
-    severity: normalizeSemgrepSeverity(result.extra?.severity),
+    severity: normalizeSemgrepSeverity(result.extra),
     category: result.extra?.metadata?.vulnerability_class?.[0] || 'Semgrep',
     name: result.extra?.message || result.check_id,
     description: result.extra?.message || 'Semgrep finding.',
