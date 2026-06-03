@@ -153,6 +153,26 @@ const NEGATIVES = [
     code: 'import crypto from "crypto";\nexport const token = () => crypto.randomBytes(32).toString("hex");\n',
   },
   { name: 'plain', file: 'src/n10.js', language: 'javascript', code: 'export const x = (a, b) => compute(a, b);\n' },
+  // WEAK_CIPHER must not fire on the "des" substring inside includes/excludes/modes
+  // (the reported false positives: args.includes('--no-update-check'), ids.includes('postgres')).
+  {
+    name: 'includes-not-cipher',
+    file: 'src/n11.js',
+    language: 'javascript',
+    code: "export const f = (args) => args.includes('--no-update-check');\n",
+  },
+  {
+    name: 'includes-postgres',
+    file: 'src/n12.js',
+    language: 'javascript',
+    code: "export const ok = (ids) => ids.includes('postgres');\n",
+  },
+  {
+    name: 'excludes-modes',
+    file: 'src/n13.js',
+    language: 'javascript',
+    code: 'export const modes = ["a"];\nexport const g = (x) => x.excludes;\n',
+  },
 ];
 
 function runOne(sample) {
