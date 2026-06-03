@@ -291,3 +291,66 @@ export async function runSecurityTool(toolKey, opts) {
     };
   }
 }
+
+/**
+ * Choose which tools are relevant for a scanned project. Gitleaks (secrets) and
+ * Trivy (filesystem/IaC) are broadly useful; Bandit/gosec are added when the
+ * stack matches. Keeps the suite focused so we do not provision tools a project
+ * cannot use.
+ *
+ * @param {{techStack?: string[], baasFiles?: string[], configFiles?: string[]}} [projectInfo]
+ * @returns {string[]}
+ */
+export function selectSecurityTools(projectInfo = {}) {
+  const stack = (projectInfo.techStack || []).map((s) => String(s).toLowerCase());
+  const tools = ['gitleaks', 'trivy'];
+  if (stack.some((s) => s.includes('python'))) tools.push('bandit');
+  if (stack.some((s) => s === 'go' || s.includes('golang'))) tools.push('gosec');
+  return tools;
+}
+
+/**
+ * Orchestrate the engine-orchestrated stack-native tools: for each candidate,
+ * resolve it (PATH/cache/opt-in download) then run it, aggregating findings.
+ * `ensure` and `run` are injected (the CLI composes them with ensureTool +
+ * runSecurityTool + real I/O; tests pass mocks). Fully fail-open per tool.
+ *
+ * @param {{candidates: string[], ensure: (toolKey: string) => Promise<any>, run: (toolKey: string, toolPath: string) => Promise<any>}} opts
+ * @returns {Promise<{findings: Array<object>, results: Array<object>}>}
+ */
+export async function gatherSecurityToolFindings(opts) {
+  const candidates = (opts && opts.candidates) || [];
+  const findings = [];
+  const results = [];
+  for (const tool of candidates) {
+    let ensured;
+    try {
+      ensured = await opts.ensure(tool);
+    } catch (err) {
+      results.push({ tool, available: false, source: 'none', reason: err && err.message ? err.message : String(err) });
+      continue;
+    }
+    if (!ensured || !ensured.available || !ensured.path) {
+      results.push({
+        tool,
+        available: false,
+        source: (ensured && ensured.source) || 'none',
+        reason: ensured && ensured.reason,
+      });
+      continue;
+    }
+    const ran = await opts.run(tool, ensured.path);
+    results.push({
+      tool,
+      available: Boolean(ran && ran.available),
+      source: ensured.source,
+      provisioned: Boolean(ensured.provisioned),
+      rawCount: (ran && ran.rawCount) || 0,
+      error: ran && ran.error,
+    });
+    if (ran && ran.available && Array.isArray(ran.findings)) {
+      findings.push(...ran.findings);
+    }
+  }
+  return { findings, results };
+}

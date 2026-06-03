@@ -1,13 +1,19 @@
 // @ts-check
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   normalizeGitleaksFindings,
   normalizeBanditFindings,
   normalizeGosecFindings,
   normalizeTrivyFindings,
   runSecurityTool,
+  gatherSecurityToolFindings,
+  selectSecurityTools,
 } from '../src/securityTools.js';
+import { runAnalysis } from '../src/index.js';
 
 test('normalizeGitleaksFindings maps findings and REDACTS the raw secret', () => {
   const report = [
@@ -178,4 +184,73 @@ test('runSecurityTool passes the rootDir only as argv (no shell interpolation)',
   // The (intentionally hostile) rootDir must appear verbatim as a single argv
   // element — never concatenated into a shell string.
   assert.ok(capturedArgv && capturedArgv.includes('/proj path; rm -rf'));
+});
+
+test('selectSecurityTools picks tools by stack (always gitleaks + trivy)', () => {
+  assert.deepEqual(selectSecurityTools({ techStack: [] }), ['gitleaks', 'trivy']);
+  assert.ok(selectSecurityTools({ techStack: ['Python'] }).includes('bandit'));
+  assert.ok(selectSecurityTools({ techStack: ['Go'] }).includes('gosec'));
+});
+
+test('gatherSecurityToolFindings aggregates available tools and skips unavailable ones', async () => {
+  const ensure = async (tool) =>
+    tool === 'gitleaks'
+      ? { available: true, path: 'gitleaks', source: 'path' }
+      : { available: false, source: 'none', reason: 'not installed' };
+  const run = async (tool, _toolPath) => ({
+    available: true,
+    findings: [{ id: `${tool}_1`, severity: 'CRITICAL', file: 'a.js', line: 1, cwe: 'CWE-798', source: tool }],
+    rawCount: 1,
+  });
+  const { findings, results } = await gatherSecurityToolFindings({ candidates: ['gitleaks', 'trivy'], ensure, run });
+  assert.equal(findings.length, 1);
+  assert.equal(results.length, 2);
+  assert.equal(results.find((r) => r.tool === 'gitleaks').available, true);
+  assert.equal(results.find((r) => r.tool === 'trivy').available, false);
+});
+
+test('gatherSecurityToolFindings is fail-open when ensure throws', async () => {
+  const ensure = async () => {
+    throw new Error('network down');
+  };
+  const run = async () => ({ available: true, findings: [], rawCount: 0 });
+  const { findings, results } = await gatherSecurityToolFindings({ candidates: ['gitleaks'], ensure, run });
+  assert.equal(findings.length, 0);
+  assert.equal(results[0].available, false);
+  assert.match(results[0].reason, /network down/);
+});
+
+test('runAnalysis: a security-tool secret corroborates the detector -> CONFIRMED', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-sectools-'));
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'app.js'), 'const password = "supersecret123";\n', 'utf8');
+
+  // Inject a gatherer that returns a Gitleaks secret at the SAME file:line:cwe
+  // as the detector's secret finding — dedup must merge them into CONFIRMED.
+  const gatherSecurityTools = async () => ({
+    findings: [
+      {
+        id: 'GITLEAKS_1',
+        severity: 'CRITICAL',
+        category: 'Secrets',
+        name: 'Gitleaks: generic-password',
+        description: 'secret',
+        file: 'src/app.js',
+        line: 1,
+        vulnerableCode: '[REDACTED]',
+        cwe: 'CWE-798',
+        confidence: 'TOOL-ONLY',
+        source: 'gitleaks',
+      },
+    ],
+    results: [{ tool: 'gitleaks', available: true, source: 'path', rawCount: 1 }],
+  });
+
+  const result = await runAnalysis(root, { outputDir: path.join(root, 'out'), runTools: false, gatherSecurityTools });
+
+  assert.deepEqual(result.securityTools, [{ tool: 'gitleaks', available: true, source: 'path', rawCount: 1 }]);
+  const confirmed = result.findings.find((f) => f.file === 'src/app.js' && f.cwe === 'CWE-798');
+  assert.ok(confirmed, 'merged finding present');
+  assert.equal(confirmed.confidence, 'CONFIRMED');
+  assert.ok((confirmed.sources || []).includes('gitleaks'));
 });
