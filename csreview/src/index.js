@@ -10,7 +10,7 @@ import { generateMarkdownReport } from './reports/markdown.js';
 import { generateSarifReport } from './reports/sarif.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
-import { loadIgnore, applyIgnore } from './ignore.js';
+import { loadIgnore, applyIgnore, compileIgnorePatterns, DEFAULT_IGNORE_PATTERNS } from './ignore.js';
 import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 
 /**
@@ -1214,12 +1214,38 @@ export async function runAnalysis(rootDir, options = {}) {
     strict: Boolean(options.strictPartials),
   });
 
-  // Report-level suppression: .csreview-ignore (path globs) then --baseline
-  // (known-finding fingerprints). Both are read-only and only filter the
-  // reported set; subagent reconciliation above runs on the full deduped set.
+  // Report-level suppression: built-in defaults + .csreview-ignore (path globs)
+  // then --baseline (known-finding fingerprints). All read-only and only filter
+  // the reported set; subagent reconciliation above runs on the full deduped set.
+  //
+  // The built-in DEFAULT_IGNORE_PATTERNS (generated caches, vendored deps) are
+  // layered FIRST, then the user's .csreview-ignore (last-match-wins, so a
+  // project can `!`-re-include a default). This is what scopes the external
+  // security tools' findings to first-party source, exactly like the detector —
+  // those tools scan the raw tree and otherwise flood the report with secrets
+  // from generated caches (e.g. a Chrome profile under .dart_tool/).
   const ignore = loadIgnore(absRoot);
-  const ignoreResult = applyIgnore(findings, ignore.compiled);
+  const ignoreCompiled = compileIgnorePatterns([...DEFAULT_IGNORE_PATTERNS, ...ignore.patterns]);
+  const ignoreResult = applyIgnore(findings, ignoreCompiled);
   let reportFindings = ignoreResult.kept;
+
+  // Attribute ignore-suppressed findings back to their originating external tool
+  // so the CLI can report an honest "raw vs filtered as generated/cache" count.
+  // The join is finding.source === result.tool (locked by a normalizer contract
+  // test). Counts are post-dedup: if a finding was reported by multiple tools
+  // and deduped to one entry, only the surviving source is counted (rawCount,
+  // captured pre-dedup, is unaffected).
+  if (securityToolResults.length > 0 && ignoreResult.suppressed.length > 0) {
+    /** @type {Record<string, number>} */
+    const suppressedBySource = {};
+    for (const f of ignoreResult.suppressed) {
+      const src = f && f.source;
+      if (src) suppressedBySource[src] = (suppressedBySource[src] || 0) + 1;
+    }
+    securityToolResults = securityToolResults.map((r) =>
+      suppressedBySource[r.tool] ? { ...r, suppressed: suppressedBySource[r.tool] } : r,
+    );
+  }
 
   /** @type {{applied: boolean, baselinedCount: number, written: string|null}} */
   const baselineInfo = { applied: false, baselinedCount: 0, written: null };

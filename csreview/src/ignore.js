@@ -173,4 +173,73 @@ export function loadIgnore(rootDir) {
   }
 }
 
+/**
+ * Built-in default suppression — directories and file globs that are never
+ * first-party source (vendored deps, build output, generated tool caches).
+ *
+ * These mirror the scanner's file-discovery exclusions, but live here as a
+ * single reusable list because the engine-orchestrated external tools
+ * (Gitleaks/Trivy/...) scan the RAW working tree and do NOT honor the scanner's
+ * discovery globs. Applying these defaults to the merged finding set scopes the
+ * tools to the same surface as the built-in detector — without it a secret
+ * scanner reports thousands of false positives from generated caches (e.g. an
+ * entire Chrome profile under `.dart_tool/`, Gradle or Supabase local state).
+ * The user's `.csreview-ignore` is layered AFTER these (last-match-wins), so a
+ * project can re-include a default with a `!negation`.
+ */
+export const DEFAULT_IGNORE_DIRS = [
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  '.next',
+  '.nuxt',
+  'coverage',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.tox',
+  '.mypy_cache',
+  'vendor',
+  'target',
+  'bin',
+  'obj',
+  '.trae',
+  '.vscode',
+  '.idea',
+  'csreview-reports',
+  '.csreview',
+  '.dart_tool', // Flutter/Dart build cache
+  '.gradle', // Gradle/Android cache
+  '.supabase', // Supabase CLI local runtime state (distinct from the `supabase/` source tree)
+];
+
+/** Built-in default file globs (minified/generated artifacts and prior reports). */
+export const DEFAULT_IGNORE_FILES = [
+  '*.min.js',
+  '*.min.css',
+  'security-report.html',
+  'security-findings.md',
+  'csreview-report.html',
+  'csreview-report.md',
+  '*_security-report.html',
+  '*_security-findings.md',
+];
+
+/**
+ * Built-in defaults in `.csreview-ignore` (gitignore) syntax, for suppressing
+ * findings from the merged report set via {@link compileIgnorePatterns}.
+ * @type {string[]}
+ */
+export const DEFAULT_IGNORE_PATTERNS = [...DEFAULT_IGNORE_DIRS.map((d) => `${d}/`), ...DEFAULT_IGNORE_FILES];
+
+/**
+ * The same defaults expressed as recursive globs for the scanner's
+ * file-discovery `ignore` option (the `glob` library's syntax).
+ * @returns {string[]}
+ */
+export function buildScannerIgnoreGlobs() {
+  return [...DEFAULT_IGNORE_DIRS.map((d) => `**/${d}/**`), ...DEFAULT_IGNORE_FILES.map((f) => `**/${f}`)];
+}
+
 export { IGNORE_FILE_NAME };

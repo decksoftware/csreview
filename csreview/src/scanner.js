@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { glob } from 'glob';
 import { safeResolveInside } from './pathSafety.js';
+import { buildScannerIgnoreGlobs } from './ignore.js';
 
 const SOURCE_EXTENSIONS = [
   'js',
@@ -66,37 +67,11 @@ const SOURCE_EXTENSIONS = [
   'gql',
 ];
 
-const IGNORE_PATTERNS = [
-  '**/node_modules/**',
-  '**/.git/**',
-  '**/dist/**',
-  '**/build/**',
-  '**/.next/**',
-  '**/.nuxt/**',
-  '**/coverage/**',
-  '**/__pycache__/**',
-  '**/.venv/**',
-  '**/venv/**',
-  '**/.tox/**',
-  '**/.mypy_cache/**',
-  '**/vendor/**',
-  '**/target/**',
-  '**/bin/**',
-  '**/obj/**',
-  '**/*.min.js',
-  '**/*.min.css',
-  '**/.trae/**',
-  '**/.vscode/**',
-  '**/.idea/**',
-  '**/security-report.html',
-  '**/security-findings.md',
-  '**/csreview-report.html',
-  '**/csreview-report.md',
-  '**/*_security-report.html',
-  '**/*_security-findings.md',
-  '**/csreview-reports/**',
-  '**/.csreview/**',
-];
+// File-discovery exclusions derived at module init from the single source of
+// truth in ignore.js (shared with the report-level default suppression that
+// scopes the external security tools). Adding a generated cache there updates
+// both paths. Keep ignore.js side-effect-free so this top-level call is safe.
+const IGNORE_PATTERNS = buildScannerIgnoreGlobs();
 
 const EXTENSION_TO_TECH = {
   js: 'JavaScript/TypeScript',

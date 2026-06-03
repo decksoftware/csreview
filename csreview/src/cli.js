@@ -277,8 +277,9 @@ try {
     console.log(chalk.bold('\n  Stack-native security tools:'));
     for (const t of result.securityTools) {
       if (t.available) {
+        const filtered = t.suppressed ? chalk.gray(`, ${t.suppressed} filtered as generated/cache`) : '';
         console.log(
-          `    ${String(t.tool).padEnd(10)} ${chalk.green('ran')} (${t.source}${t.provisioned ? ', provisioned' : ''}, ${t.rawCount || 0} findings)`,
+          `    ${String(t.tool).padEnd(10)} ${chalk.green('ran')} (${t.source}${t.provisioned ? ', provisioned' : ''}, ${t.rawCount || 0} findings)${filtered}`,
         );
       } else {
         console.log(
@@ -321,7 +322,9 @@ try {
   }
 
   if (result.suppressedByIgnore > 0) {
-    console.log(`\n  ${chalk.gray(`Suppressed by .csreview-ignore: ${result.suppressedByIgnore}`)}`);
+    console.log(
+      `\n  ${chalk.gray(`Suppressed by ignore rules (generated caches, vendored deps, .csreview-ignore): ${result.suppressedByIgnore}`)}`,
+    );
   }
   if (result.baseline?.applied) {
     console.log(`  ${chalk.gray(`Baselined (known) findings hidden: ${result.baseline.baselinedCount}`)}`);

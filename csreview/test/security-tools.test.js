@@ -319,3 +319,78 @@ test('runAnalysis: a security-tool secret corroborates the detector -> CONFIRMED
   assert.equal(confirmed.confidence, 'CONFIRMED');
   assert.ok((confirmed.sources || []).includes('gitleaks'));
 });
+
+test('runAnalysis scopes external-tool findings to first-party source (suppresses generated caches)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-toolscope-'));
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'real.js'), '// nothing sensitive here\n', 'utf8');
+
+  // A Gitleaks run that surfaced two "secrets": one in real first-party source,
+  // and one inside a generated Flutter cache (the exact CaiuPixOld chrome-device
+  // noise). Only the first-party finding may reach the report.
+  const gatherSecurityTools = async () => ({
+    findings: [
+      {
+        id: 'GITLEAKS_1',
+        severity: 'CRITICAL',
+        category: 'Secrets',
+        name: 'Gitleaks: generic-api-key',
+        description: 'secret',
+        file: 'src/real.js',
+        line: 1,
+        vulnerableCode: '[REDACTED]',
+        cwe: 'CWE-798',
+        confidence: 'TOOL-ONLY',
+        source: 'gitleaks',
+      },
+      {
+        id: 'GITLEAKS_2',
+        severity: 'CRITICAL',
+        category: 'Secrets',
+        name: 'Gitleaks: generic-api-key',
+        description: 'secret',
+        file: 'lib/operator/.dart_tool/chrome-device/Default/Preferences',
+        line: 1,
+        vulnerableCode: '[REDACTED]',
+        cwe: 'CWE-798',
+        confidence: 'TOOL-ONLY',
+        source: 'gitleaks',
+      },
+    ],
+    results: [{ tool: 'gitleaks', available: true, source: 'path', rawCount: 2 }],
+  });
+
+  const result = await runAnalysis(root, { outputDir: path.join(root, 'out'), runTools: false, gatherSecurityTools });
+
+  // generated-cache secret suppressed; first-party secret retained
+  assert.ok(
+    result.findings.some((f) => f.file === 'src/real.js'),
+    'first-party finding kept',
+  );
+  assert.ok(!result.findings.some((f) => String(f.file).includes('.dart_tool')), 'generated-cache finding suppressed');
+  assert.ok(result.suppressedByIgnore >= 1);
+  // honest per-tool reporting: the result is annotated with how many it filtered
+  const gl = result.securityTools.find((r) => r.tool === 'gitleaks');
+  assert.ok(gl);
+  assert.equal(gl.rawCount, 2);
+  assert.equal(gl.suppressed, 1);
+});
+
+test('normalizer source tags match the selectSecurityTools slugs (suppression-attribution contract)', () => {
+  // index.js attributes ignore-suppressed findings back to a tool by matching
+  // finding.source === securityToolResults[].tool. Lock that invariant so a
+  // normalizer cannot silently break the per-tool "filtered" count (Codex H1).
+  const slugs = new Set(selectSecurityTools({ techStack: ['Python', 'Go'] })); // gitleaks, trivy, bandit, gosec
+  const sources = {
+    gitleaks: normalizeGitleaksFindings([{ RuleID: 'x', File: 'a.js', StartLine: 1 }])[0].source,
+    trivy: normalizeTrivyFindings({
+      Results: [{ Target: 't', Secrets: [{ RuleID: 'x', StartLine: 1, Match: 'zzzz' }] }],
+    })[0].source,
+    bandit: normalizeBanditFindings({ results: [{ filename: 'a.py', line_number: 1, test_id: 'B105' }] })[0].source,
+    gosec: normalizeGosecFindings({ Issues: [{ rule_id: 'G101', file: 'a.go', line: 1 }] })[0].source,
+  };
+  for (const [tool, source] of Object.entries(sources)) {
+    assert.equal(source, tool, `${tool} normalizer must tag source='${tool}'`);
+    assert.ok(slugs.has(source), `source '${source}' must be a selectSecurityTools slug`);
+  }
+});
