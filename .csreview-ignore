@@ -1,0 +1,10 @@
+# CSReview self-scan hygiene (read-only; report-level suppression).
+#
+# Mirrors csreview/.csreview-ignore so a self-audit is clean whether the scan root
+# is the repo root or the package dir. These files DEFINE the security rules and
+# remediation content (regex literals, rule names, descriptions, exploitation
+# examples, the DB-dump guide's sample connection strings); the heuristic detector
+# matches its own definitions when scanning csreview itself. Logic bugs are still
+# covered by Semgrep + CodeQL in CI.
+**/src/detector.js
+**/src/dumpGuide.js
