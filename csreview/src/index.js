@@ -10,7 +10,13 @@ import { generateMarkdownReport } from './reports/markdown.js';
 import { generateSarifReport } from './reports/sarif.js';
 import { calculateSecurityScore } from './score.js';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
-import { loadIgnore, applyIgnore, compileIgnorePatterns, DEFAULT_IGNORE_PATTERNS } from './ignore.js';
+import {
+  loadIgnore,
+  applyIgnore,
+  compileIgnorePatterns,
+  DEFAULT_IGNORE_PATTERNS,
+  DEFAULT_IGNORE_DIRS,
+} from './ignore.js';
 import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 
 /**
@@ -865,12 +871,26 @@ export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd(
   return findings;
 }
 
+/**
+ * Build Semgrep `--exclude <dir>` argument pairs from the canonical ignore-dir
+ * list so Semgrep skips the SAME build outputs / vendored dirs as the heuristic
+ * detector. Without this Semgrep scanned `.output`, `dist`, `.nuxt`, etc. and
+ * produced critical false positives from compiled bundles (e.g. prototype
+ * pollution in `_nitro.mjs`).
+ *
+ * @param {string[]} [dirs]
+ * @returns {string[]}
+ */
+export function semgrepExcludeArgs(dirs = DEFAULT_IGNORE_DIRS) {
+  return dirs.flatMap((dir) => ['--exclude', dir]);
+}
+
 async function runSemgrep(rootDir) {
   try {
     const versionResult = await execTool('semgrep', ['--version'], { timeout: VERSION_CHECK_TIMEOUT_MS });
     const scanResult = await execTool(
       'semgrep',
-      ['--config', 'auto', '--json', '--quiet', '--exclude', 'node_modules', '--exclude', 'csreview-reports', rootDir],
+      ['--config', 'auto', '--json', '--quiet', ...semgrepExcludeArgs(), rootDir],
       {
         cwd: rootDir,
         timeout: 120000,

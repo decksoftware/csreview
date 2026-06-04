@@ -87,6 +87,25 @@ test('findings in non-source paths (test/fixtures) are downgraded; real source k
   assert.equal(inTest.confidence, 'LOW');
 });
 
+test('DEFAULT_CREDENTIALS does not fire on UI role-label maps but still catches weak password defaults', () => {
+  // FP (DeckMidia): a role->label map like { admin: 'Admin' } was flagged as
+  // CRITICAL Default Credentials because the rule matched admin: 'Admin'.
+  const fp = scan([
+    { path: 'src/labels.js', code: "export const roleLabels = { owner: 'Owner', admin: 'Admin', test: 'Test' };\n" },
+  ]);
+  assert.equal(
+    fp.filter((f) => String(f.id).startsWith('DEFAULT_CREDENTIALS')).length,
+    0,
+    `unexpected DEFAULT_CREDENTIALS FPs: ${fp.map((f) => f.file).join(', ')}`,
+  );
+  // TP: a credential field set to a weak/default value must still be caught.
+  const tp = scan([{ path: 'src/cfg.js', code: "export const cfg = { password: 'admin', pwd: 'changeme' };\n" }]);
+  assert.ok(
+    tp.some((f) => String(f.id).startsWith('DEFAULT_CREDENTIALS')),
+    'expected DEFAULT_CREDENTIALS to catch password: "admin"',
+  );
+});
+
 test('the shipped .csreview-ignore keeps a csreview self-audit free of rule-definition meta-FPs', async () => {
   // A scanner must not flag its own rulebook: detector.js (regexes/descriptions/
   // exploitation strings) and dumpGuide.js (sample connection strings) match the

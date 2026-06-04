@@ -219,6 +219,18 @@ export const DEFAULT_IGNORE_DIRS = [
   '.dart_tool', // Flutter/Dart build cache
   '.gradle', // Gradle/Android cache
   '.supabase', // Supabase CLI local runtime state (distinct from the `supabase/` source tree)
+  // JS/TS framework build outputs & deploy/cache dirs — compiled/bundled code,
+  // never first-party source. `.output` (Nuxt/Nitro) was the dominant false-
+  // positive source on a real monorepo: prototype-pollution in `_nitro.mjs`,
+  // JWTs in bundles, etc. (`.next`/`.nuxt` were already covered above.)
+  '.output', // Nuxt/Nitro build output
+  'out', // Next.js static export
+  '.vercel', // Vercel build output
+  '.netlify', // Netlify build output
+  '.svelte-kit', // SvelteKit build output
+  '.angular', // Angular cache/build
+  '.turbo', // Turborepo cache
+  '.parcel-cache', // Parcel cache
 ];
 
 /** Built-in default file globs (minified/generated artifacts and prior reports). */
