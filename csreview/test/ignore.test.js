@@ -129,6 +129,8 @@ test('DEFAULT_IGNORE_DIRS covers vendored deps, build output, and generated cach
     '.dart_tool', // Flutter/Dart cache (the dominant external-tool noise source)
     '.gradle', // Gradle/Android cache
     '.supabase', // Supabase CLI local runtime state
+    '.output', // Nuxt/Nitro build output (the DeckMidia .output false-positive source)
+    'out', // Next.js static export
     'csreview-reports',
     '.csreview',
   ]) {
@@ -142,6 +144,9 @@ test('DEFAULT_IGNORE_PATTERNS are gitignore-syntax and scope external-tool findi
   assert.ok(isIgnored('flutter/apps/operator/.dart_tool/chrome-device/Default/Preferences', compiled));
   assert.ok(isIgnored('supabase-stuff/.supabase/postgres/data/x', compiled));
   assert.ok(isIgnored('android/app/.gradle/cache/x', compiled));
+  // Nuxt/Nitro build output — the DeckMidia false positives (prototype pollution
+  // in _nitro.mjs, JWT in bundles) all came from here.
+  assert.ok(isIgnored('apps/web/.output/server/chunks/_nitro.mjs', compiled));
   assert.ok(isIgnored('a/node_modules/pkg/index.js', compiled));
   assert.ok(isIgnored('packages/web/dist/bundle.min.js', compiled));
   // root-level cache dirs (no parent component) must also match — guards against

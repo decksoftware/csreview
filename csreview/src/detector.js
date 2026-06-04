@@ -851,7 +851,11 @@ const VULNERABILITY_PATTERNS = [
     category: 'Configuration',
     name: 'Default Credentials',
     description: 'Default admin/password credentials.',
-    regex: /(?:admin|root|default|test)['"]?\s*[:=]\s*['"](?:admin|password|123456|root|default|changeme|test)['"]/gi,
+    // Requires a credential-context KEY (password/pwd/secret/credential) set to a
+    // weak/default value — not a bare admin|root|default|test key, which matched
+    // UI role-label maps like `{ admin: 'Admin' }` (a CRITICAL false positive).
+    regex:
+      /(?:pass(?:word|wd)?|pwd|secret|credential)['"]?\s*[:=]\s*['"](?:admin|password|123456|root|default|changeme|test|pass|secret|letmein|qwerty|admin123|password1|password123)['"]/gi,
     cwe: 'CWE-798',
     owasp: 'A07:2021-Identification and Authentication Failures',
     fix: 'Change all default credentials.',
