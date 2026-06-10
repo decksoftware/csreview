@@ -21,6 +21,14 @@ security-findings.md
 *_security-findings.md
 **/*_security-report.html
 **/*_security-findings.md
+*_security.sarif
+**/*_security.sarif
+*_local-dast-report*.html
+*_local-dast-findings*.md
+**/*_local-dast-report*.html
+**/*_local-dast-findings*.md
+*_db-dump-guide.html
+**/*_db-dump-guide.html
 
 CSREVIEW-ANALISES.md
 CSREVIEW-ANALISES*.md
