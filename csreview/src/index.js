@@ -18,6 +18,8 @@ import {
   DEFAULT_IGNORE_DIRS,
 } from './ignore.js';
 import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
+import { sanitizeAgentName } from './agentName.js';
+import { getLanguage } from './languages.js';
 
 /**
  * Canonical finding object exchanged by the deterministic engine, tool
@@ -155,71 +157,6 @@ export function validateWindowsCmdArgs(commandPath, args, platform = process.pla
   }
 }
 
-const LANG_MAP = {
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  jsx: 'javascript',
-  py: 'python',
-  java: 'java',
-  kt: 'kotlin',
-  go: 'go',
-  rs: 'rust',
-  php: 'php',
-  rb: 'ruby',
-  cs: 'csharp',
-  swift: 'swift',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  cc: 'cpp',
-  cxx: 'cpp',
-  hpp: 'cpp',
-  pas: 'delphi',
-  dpr: 'delphi',
-  dpk: 'delphi',
-  lpr: 'delphi',
-  pp: 'delphi',
-  vue: 'vue',
-  svelte: 'svelte',
-  sh: 'bash',
-  bash: 'bash',
-  sql: 'sql',
-  graphql: 'graphql',
-  gql: 'graphql',
-  html: 'html',
-  htm: 'html',
-  xml: 'xml',
-  json: 'json',
-  yaml: 'yaml',
-  yml: 'yaml',
-  toml: 'toml',
-  env: 'env',
-  tf: 'terraform',
-  tfvars: 'terraform',
-  lua: 'lua',
-  r: 'r',
-  R: 'r',
-  scala: 'scala',
-  groovy: 'groovy',
-  ex: 'elixir',
-  exs: 'elixir',
-  erl: 'erlang',
-  hs: 'haskell',
-  dart: 'dart',
-  zig: 'zig',
-  nim: 'nim',
-  v: 'v',
-  sol: 'solidity',
-};
-
-function getLanguage(filePath) {
-  const ext = filePath.includes('.') ? filePath.split('.').pop().toLowerCase() : '';
-  return LANG_MAP[ext] || 'unknown';
-}
-
 function enrichFiles(projectInfo) {
   const configSet = new Set(projectInfo.configFiles || []);
   const baasSet = new Set(projectInfo.baasFiles || []);
@@ -242,37 +179,25 @@ function formatDuration(ms) {
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
 }
 
-function sanitizeAgentName(agentName) {
-  const raw = String(agentName || 'codex')
-    .trim()
-    .toLowerCase();
-  let normalized = '';
-  let lastWasGeneratedHyphen = false;
+// Default per-tool execution budget. Large repos can exceed it — in that case
+// the scan silently degraded to "unavailable" with a generic message, so the
+// timeout branch below names the cause and the knob that raises it.
+const DEFAULT_TOOL_TIMEOUT_MS = 120000;
 
-  for (const char of raw) {
-    const code = char.charCodeAt(0);
-    const isSafeAscii = (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || char === '_' || char === '-';
-
-    if (isSafeAscii) {
-      normalized += char;
-      lastWasGeneratedHyphen = false;
-    } else if (normalized && !lastWasGeneratedHyphen) {
-      normalized += '-';
-      lastWasGeneratedHyphen = true;
-    }
-  }
-
-  let start = 0;
-  let end = normalized.length;
-  while (start < end && normalized[start] === '-') start += 1;
-  while (end > start && normalized[end - 1] === '-') end -= 1;
-
-  return normalized.slice(start, end) || 'codex';
-}
-
-function toolErrorMessage(command, err) {
+/**
+ * Human-readable failure reason for an external tool run.
+ *
+ * @param {string} command
+ * @param {{code?: string, killed?: boolean, signal?: string, message?: string}} err
+ * @param {number} [timeoutMs] the timeout the tool ran under, for the message
+ */
+export function toolErrorMessage(command, err, timeoutMs) {
   if (err?.code === 'ENOENT') {
     return `${command} not found in PATH`;
+  }
+  if (err?.killed && (err?.signal === 'SIGTERM' || err?.signal === 'SIGKILL')) {
+    const seconds = Math.round((timeoutMs || DEFAULT_TOOL_TIMEOUT_MS) / 1000);
+    return `${command} timed out after ${seconds}s; raise it with --tool-timeout <seconds> or narrow the scan scope`;
   }
   if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(err?.message || '')) {
     return `${command} output exceeded maxBuffer; rerun with a narrower scope or inspect the tool output directly`;
@@ -885,18 +810,35 @@ export function semgrepExcludeArgs(dirs = DEFAULT_IGNORE_DIRS) {
   return dirs.flatMap((dir) => ['--exclude', dir]);
 }
 
-async function runSemgrep(rootDir) {
+/**
+ * Build the Semgrep scan argument list. `--config auto` (the default) pulls
+ * rules from the registry and REQUIRES metrics, so they stay on; any other
+ * config (a local rules path or explicit registry ref) is run with
+ * `--metrics=off`, which is what makes air-gapped/private scans possible.
+ *
+ * @param {string} rootDir
+ * @param {{config?: string}} [options]
+ * @returns {string[]}
+ */
+export function buildSemgrepArgs(rootDir, options = {}) {
+  const config = options.config || 'auto';
+  const args = ['--config', config, '--json', '--quiet', ...semgrepExcludeArgs()];
+  if (config !== 'auto') {
+    args.push('--metrics=off');
+  }
+  args.push(rootDir);
+  return args;
+}
+
+async function runSemgrep(rootDir, options = {}) {
+  const timeoutMs = options.timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
   try {
     const versionResult = await execTool('semgrep', ['--version'], { timeout: VERSION_CHECK_TIMEOUT_MS });
-    const scanResult = await execTool(
-      'semgrep',
-      ['--config', 'auto', '--json', '--quiet', ...semgrepExcludeArgs(), rootDir],
-      {
-        cwd: rootDir,
-        timeout: 120000,
-        maxBuffer: 20 * 1024 * 1024,
-      },
-    );
+    const scanResult = await execTool('semgrep', buildSemgrepArgs(rootDir, { config: options.config }), {
+      cwd: rootDir,
+      timeout: timeoutMs,
+      maxBuffer: 20 * 1024 * 1024,
+    });
     const parsed = JSON.parse(scanResult.stdout || '{}');
     return {
       available: true,
@@ -911,7 +853,7 @@ async function runSemgrep(rootDir) {
       available: false,
       required: true,
       version: null,
-      error: toolErrorMessage('semgrep', err),
+      error: toolErrorMessage('semgrep', err, timeoutMs),
       findings: [],
       rawCount: 0,
     };
@@ -1007,7 +949,8 @@ export function detectNodeAuditStrategy(rootDir) {
   };
 }
 
-async function runPackageAudit(rootDir) {
+async function runPackageAudit(rootDir, options = {}) {
+  const timeoutMs = options.timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
   const strategy = detectNodeAuditStrategy(rootDir);
   if (strategy.skipped) {
     return {
@@ -1029,7 +972,7 @@ async function runPackageAudit(rootDir) {
     try {
       const auditResult = await execTool(strategy.command, strategy.args, {
         cwd: rootDir,
-        timeout: 120000,
+        timeout: timeoutMs,
         maxBuffer: 20 * 1024 * 1024,
       });
       stdout = auditResult.stdout;
@@ -1065,21 +1008,22 @@ async function runPackageAudit(rootDir) {
       manager: strategy.manager,
       lockfile: strategy.lockfile,
       version: null,
-      error: toolErrorMessage(strategy.label || strategy.command, err),
+      error: toolErrorMessage(strategy.label || strategy.command, err, timeoutMs),
       findings: [],
       rawCount: 0,
     };
   }
 }
 
-async function runOsvScanner(rootDir) {
+async function runOsvScanner(rootDir, options = {}) {
+  const timeoutMs = options.timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
   try {
     const versionResult = await execTool('osv-scanner', ['--version'], { timeout: 30000 });
     let stdout = '';
     try {
       const scanResult = await execTool('osv-scanner', ['scan', '--format', 'json', rootDir], {
         cwd: rootDir,
-        timeout: 120000,
+        timeout: timeoutMs,
         maxBuffer: 20 * 1024 * 1024,
       });
       stdout = scanResult.stdout;
@@ -1102,7 +1046,7 @@ async function runOsvScanner(rootDir) {
       available: false,
       required: false,
       version: null,
-      error: toolErrorMessage('osv-scanner', err),
+      error: toolErrorMessage('osv-scanner', err, timeoutMs),
       findings: [],
       rawCount: 0,
     };
@@ -1160,7 +1104,7 @@ export async function checkExternalTools(rootDir = process.cwd()) {
  * Run engine-orchestrated external tools once and return their normalized output.
  *
  * @param {string} rootDir
- * @param {{runTools?: boolean}} options
+ * @param {{runTools?: boolean, toolTimeoutMs?: number, semgrepConfig?: string}} options
  * @returns {Promise<ToolResults>}
  */
 async function runSecurityTools(rootDir, options) {
@@ -1168,10 +1112,11 @@ async function runSecurityTools(rootDir, options) {
     return createSkippedToolResult('Tool execution disabled by caller.');
   }
 
+  const timeoutMs = options.toolTimeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
   const [semgrep, packageAudit, osvScanner] = await Promise.all([
-    runSemgrep(rootDir),
-    runPackageAudit(rootDir),
-    runOsvScanner(rootDir),
+    runSemgrep(rootDir, { timeoutMs, config: options.semgrepConfig }),
+    runPackageAudit(rootDir, { timeoutMs }),
+    runOsvScanner(rootDir, { timeoutMs }),
   ]);
   return {
     mode: classifyToolMode({ semgrep, packageAudit, npmAudit: packageAudit, osvScanner }),
@@ -1210,7 +1155,7 @@ export function classifyToolMode(toolResults = {}) {
  * Run a full CSReview static analysis and write reports.
  *
  * @param {string} rootDir
- * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string, gatherSecurityTools?: (projectInfo: object, rootDir: string) => Promise<{findings?: Array<object>, results?: Array<object>}>}} [options]
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string, toolTimeoutMs?: number, semgrepConfig?: string, gatherSecurityTools?: (projectInfo: object, rootDir: string) => Promise<{findings?: Array<object>, results?: Array<object>}>}} [options]
  */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();

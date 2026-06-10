@@ -1,6 +1,7 @@
 // @ts-check
 import { readFileSafe } from './scanner.js';
 import { safeResolveInside } from './pathSafety.js';
+import { getLanguage } from './languages.js';
 
 const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
@@ -363,14 +364,17 @@ const VULNERABILITY_PATTERNS = [
     severity: 'CRITICAL',
     category: 'Injection',
     name: 'XML External Entity (XXE)',
-    description: 'XML parsing without disabling external entities.',
+    description: 'XML parser explicitly configured to resolve external entities or load DTDs.',
+    // Only explicit insecure configuration. A negative lookahead placed after a
+    // lazy `.*?` is always satisfiable, so the previous pattern flagged EVERY
+    // parser mention (including the entity-free browser DOMParser) as CRITICAL.
     regex:
-      /(?:libxml|xml2js|DOMParser|XMLParser|SAXParser|lxml|etree).*?(?!.*(?:noent|nonet|dtdload|noDTDload|resolveEntities\s*[=:]\s*(?:false|0)))/gi,
+      /\bnoent\b\s*[:=]\s*true|\bLIBXML_(?:NOENT|DTDLOAD)\b|libxml_disable_entity_loader\s*\(\s*false|\b(?:resolve_entities|load_dtd)\s*=\s*true|setExpandEntityReferences\s*\(\s*true|external-(?:general|parameter)-entities['"]\s*,\s*true|disallow-doctype-decl['"]\s*,\s*false|DtdProcessing\.Parse|XmlResolver\s*=\s*new\s+XmlUrlResolver|ParseOptions::NOENT|Nokogiri[^\n]*\bnoent\b/gi,
     cwe: 'CWE-611',
     owasp: 'A05:2021-Security Misconfiguration',
-    fix: 'Disable external entity processing.',
+    fix: 'Keep external entity resolution disabled (noent: false, resolve_entities=False, DtdProcessing.Prohibit) or use a hardened parser such as defusedxml.',
     exploitation: 'Attacker submits XXE payload to read server files.',
-    confidence: 'MEDIUM',
+    confidence: 'HIGH',
     vibeRisk: false,
     references: ['https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html'],
   },
@@ -1349,29 +1353,6 @@ const CONFIG_MISCONFIG_PATTERNS = [
   },
 ];
 
-const LANGUAGE_MAP = {
-  '.js': 'javascript',
-  '.mjs': 'javascript',
-  '.cjs': 'javascript',
-  '.ts': 'typescript',
-  '.tsx': 'typescript',
-  '.py': 'python',
-  '.java': 'java',
-  '.go': 'go',
-  '.rs': 'rust',
-  '.php': 'php',
-  '.rb': 'ruby',
-  '.cs': 'csharp',
-  '.c': 'c',
-  '.cpp': 'cpp',
-  '.h': 'c',
-  '.hpp': 'cpp',
-  '.pas': 'delphi',
-  '.dpr': 'delphi',
-  '.lpr': 'delphi',
-  '.pp': 'delphi',
-};
-
 const LANGUAGE_SPECIFIC_PATTERNS = {
   python: ['PY_DESERIALIZE', 'PY_SQL_INJECTION', 'PY_COMMAND_INJECTION', 'PY_REQUESTS_VERIFY'],
   csharp: ['CS_SQL_INJECTION', 'CS_DESERIALIZE', 'CS_XSS', 'CS_PATH_TRAVERSAL'],
@@ -1531,9 +1512,9 @@ function snippetAroundMatch(line, match, maxLength = 2000) {
   return `${prefix}${text.slice(start, end)}${suffix}`;
 }
 
-export function detectSecrets(content, filePath) {
+export function detectSecrets(content, filePath, precomputedLines) {
   const findings = [];
-  const lines = content.split('\n');
+  const lines = precomputedLines || content.split('\n');
 
   for (const pattern of SECRET_PATTERNS) {
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
@@ -1570,7 +1551,7 @@ export function detectSecrets(content, filePath) {
   return findings;
 }
 
-function detectInContent(content, filePath, language, kind) {
+function detectInContent(content, filePath, language, kind, precomputedLines) {
   const findings = [];
   const patterns = VULNERABILITY_PATTERNS.filter((pattern) => !LANGUAGE_SPECIFIC_PATTERN_IDS.has(pattern.id));
 
@@ -1589,7 +1570,7 @@ function detectInContent(content, filePath, language, kind) {
     patterns.push(...CONFIG_MISCONFIG_PATTERNS);
   }
 
-  const lines = content.split('\n');
+  const lines = precomputedLines || content.split('\n');
 
   for (const pattern of patterns) {
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
@@ -1643,7 +1624,15 @@ export function detectVulnerabilities(projectInfo) {
     const ext = file.path.slice(file.path.lastIndexOf('.')).toLowerCase();
     if (BINARY_EXTENSIONS.has(ext)) continue;
 
-    const language = file.language && file.language !== 'unknown' ? file.language : LANGUAGE_MAP[ext] || null;
+    // Fallback to the shared extension map so a caller that did not enrich
+    // `language` still gets the language-specific rule set (e.g. *.pyw).
+    const fallbackLanguage = getLanguage(file.path);
+    const language =
+      file.language && file.language !== 'unknown'
+        ? file.language
+        : fallbackLanguage !== 'unknown'
+          ? fallbackLanguage
+          : null;
 
     let content;
     let isMinified;
@@ -1659,12 +1648,14 @@ export function detectVulnerabilities(projectInfo) {
     }
     if (!content || typeof content !== 'string') continue;
 
-    const secretFindings = detectSecrets(content, file.path);
+    // Split once per file; secrets and vulnerability passes share the lines.
+    const lines = content.split('\n');
+    const secretFindings = detectSecrets(content, file.path, lines);
     allFindings.push(...secretFindings);
 
     if (isMinified) continue;
 
-    const vulnFindings = detectInContent(content, file.path, language, file.kind);
+    const vulnFindings = detectInContent(content, file.path, language, file.kind, lines);
     allFindings.push(...vulnFindings);
   }
 

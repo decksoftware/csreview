@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 import { safeResolveInside } from './pathSafety.js';
+import { sanitizeAgentName } from './agentName.js';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -14,16 +15,6 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function sanitizeAgentName(agentName) {
-  const normalized = String(agentName || 'codex')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return normalized || 'codex';
 }
 
 // fileBased: the database lives in a file. Finding that file in the repo/installer is

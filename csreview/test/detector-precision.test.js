@@ -95,6 +95,27 @@ const POSITIVES = [
     cwe: 'CWE-22',
     code: 'import fs from "fs";\nexport const read = (req, cb) => fs.readFile(req.query.path, cb);\n',
   },
+  {
+    name: 'js-xxe-noent',
+    file: 'src/m.js',
+    language: 'javascript',
+    cwe: 'CWE-611',
+    code: 'import libxmljs from "libxmljs";\nexport const parse = (xml) => libxmljs.parseXml(xml, { noent: true });\n',
+  },
+  {
+    name: 'py-xxe-resolve-entities',
+    file: 'src/m2.py',
+    language: 'python',
+    cwe: 'CWE-611',
+    code: 'from lxml import etree\n\nparser = etree.XMLParser(resolve_entities=True)\n',
+  },
+  {
+    name: 'php-xxe-libxml-noent',
+    file: 'src/m3.php',
+    language: 'php',
+    cwe: 'CWE-611',
+    code: '<?php\n$doc = simplexml_load_string($xml, "SimpleXMLElement", LIBXML_NOENT);\n',
+  },
 ];
 
 const NEGATIVES = [
@@ -173,6 +194,27 @@ const NEGATIVES = [
     language: 'javascript',
     code: 'export const modes = ["a"];\nexport const g = (x) => x.excludes;\n',
   },
+  // XML_XXE must require an explicitly insecure entity configuration. Browser
+  // DOMParser never resolves external entities, and noent:false / nonet:true /
+  // resolve_entities=False are the SAFE configurations.
+  {
+    name: 'domparser-benign',
+    file: 'src/n14.js',
+    language: 'javascript',
+    code: 'export const parse = (html) => new DOMParser().parseFromString(html, "text/html");\n',
+  },
+  {
+    name: 'libxml-safe-config',
+    file: 'src/n15.js',
+    language: 'javascript',
+    code: 'import libxml from "libxmljs";\nexport const parse = (data) => libxml.parseXml(data, { noent: false, nonet: true });\n',
+  },
+  {
+    name: 'py-xxe-safe',
+    file: 'src/n16.py',
+    language: 'python',
+    code: 'from lxml import etree\n\nparser = etree.XMLParser(resolve_entities=False)\n',
+  },
 ];
 
 function runOne(sample) {
@@ -215,4 +257,31 @@ test('detector produces no HIGH/CRITICAL false positives on the negative corpus'
     }
   }
   assert.equal(falsePositives.length, 0, `unexpected false positives: ${falsePositives.join(' | ')}`);
+});
+
+// Regression guard for the XML_XXE pattern: the old `.*?(?!.*noent)` lookahead
+// was always satisfiable, so ANY line mentioning an XML parser (including the
+// entity-free browser DOMParser) produced a CRITICAL. The pattern must fire on
+// explicitly insecure entity configuration and stay silent otherwise.
+test('XML_XXE fires only on explicitly insecure entity configuration', () => {
+  const insecure = POSITIVES.filter((sample) => sample.cwe === 'CWE-611');
+  assert.ok(insecure.length >= 3, 'expected XXE positives in the corpus');
+  for (const sample of insecure) {
+    const findings = runOne(sample);
+    assert.ok(
+      findings.some((f) => canonicalCwe(f.cwe) === 'CWE-611'),
+      `${sample.name}: expected a CWE-611 finding`,
+    );
+  }
+  for (const sample of NEGATIVES.filter((s) =>
+    ['domparser-benign', 'libxml-safe-config', 'py-xxe-safe'].includes(s.name),
+  )) {
+    const findings = runOne(sample);
+    const xxe = findings.filter((f) => canonicalCwe(f.cwe) === 'CWE-611');
+    assert.equal(
+      xxe.length,
+      0,
+      `${sample.name}: safe XML usage must not raise CWE-611 (got ${xxe.map((f) => f.id).join(', ')})`,
+    );
+  }
 });

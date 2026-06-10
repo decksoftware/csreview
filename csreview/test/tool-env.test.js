@@ -46,3 +46,39 @@ test('semgrepExcludeArgs excludes build outputs and vendored dirs (the DeckMidia
     assert.ok(excluded.has(dir), `semgrep must exclude ${dir}`);
   }
 });
+
+// --tool-timeout / --semgrep-config wiring: the scan must be able to run
+// against local rules (air-gapped, no registry metrics) and a timed-out tool
+// must say so explicitly — "unavailable" hid that the scan silently degraded.
+
+test('buildSemgrepArgs defaults to --config auto without disabling metrics', async () => {
+  const { buildSemgrepArgs } = await import('../src/index.js');
+  const args = buildSemgrepArgs('/proj');
+  const i = args.indexOf('--config');
+  assert.equal(args[i + 1], 'auto');
+  assert.ok(!args.includes('--metrics=off'), 'auto config requires registry metrics; must not disable them');
+  assert.equal(args[args.length - 1], '/proj');
+  assert.ok(args.includes('--exclude'), 'build-output excludes must be preserved');
+});
+
+test('buildSemgrepArgs uses a custom config with metrics off (offline-friendly)', async () => {
+  const { buildSemgrepArgs } = await import('../src/index.js');
+  const args = buildSemgrepArgs('/proj', { config: './semgrep-rules' });
+  const i = args.indexOf('--config');
+  assert.equal(args[i + 1], './semgrep-rules');
+  assert.ok(args.includes('--metrics=off'));
+});
+
+test('toolErrorMessage explains a timeout and how to raise it', async () => {
+  const { toolErrorMessage } = await import('../src/index.js');
+  const err = Object.assign(new Error('Command failed: semgrep'), { killed: true, signal: 'SIGTERM' });
+  const msg = toolErrorMessage('semgrep', err, 120000);
+  assert.match(msg, /timed out after 120s/i);
+  assert.match(msg, /--tool-timeout/);
+});
+
+test('toolErrorMessage keeps the not-found message for ENOENT', async () => {
+  const { toolErrorMessage } = await import('../src/index.js');
+  const err = Object.assign(new Error('spawn semgrep ENOENT'), { code: 'ENOENT' });
+  assert.match(toolErrorMessage('semgrep', err), /not found in PATH/);
+});
