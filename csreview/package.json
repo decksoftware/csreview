@@ -29,6 +29,7 @@
   "license": "MIT",
   "files": [
     "src/",
+    "reference/",
     "SKILL.md",
     "README.md",
     "LICENSE"
