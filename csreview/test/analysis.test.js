@@ -693,7 +693,9 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const osvScanner = recommendedTools.find((tool) => tool.name === 'osv-scanner');
   const pnpmAudit = recommendedTools.find((tool) => tool.name === 'pnpm audit');
 
-  assert.equal(pkg.version, '0.1.3');
+  // Shape, not a pinned number: pinning the exact version forced editing this
+  // test on every release bump without protecting anything.
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
   assert.ok(pkg.keywords.includes('semgrep'));
