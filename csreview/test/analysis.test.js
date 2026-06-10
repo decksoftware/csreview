@@ -26,6 +26,20 @@ function makeTempProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csreview-test-'));
 }
 
+// The documentation set under contract: the GitHub landing README, the
+// canonical SKILL.md, and the on-demand reference/*.md files SKILL.md links to.
+// Doc-honesty tests assert against the whole set so content can move between
+// the lean instruction core and the reference files without losing a contract.
+function readDocs() {
+  const referenceDir = 'reference';
+  const referenceDocs = fs
+    .readdirSync(referenceDir)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => fs.readFileSync(path.join(referenceDir, name), 'utf8'));
+  return [fs.readFileSync('../README.md', 'utf8'), fs.readFileSync('SKILL.md', 'utf8'), ...referenceDocs].join('\n');
+}
+
 function writeFile(root, relativePath, content) {
   const target = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -679,7 +693,9 @@ test('package metadata declares Semgrep as a required external tool', () => {
   const osvScanner = recommendedTools.find((tool) => tool.name === 'osv-scanner');
   const pnpmAudit = recommendedTools.find((tool) => tool.name === 'pnpm audit');
 
-  assert.equal(pkg.version, '0.1.3');
+  // Shape, not a pinned number: pinning the exact version forced editing this
+  // test on every release bump without protecting anything.
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
   assert.ok(pkg.keywords.includes('semgrep'));
@@ -707,7 +723,7 @@ test('skill requires external research when framework or security context is unc
 });
 
 test('skill recommends stack-native read-only lint and scanner tools', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Stack-Native Tool Recommendation Matrix/i);
   assert.match(docs, /do not install.*analyzed project/i);
@@ -724,7 +740,7 @@ test('skill recommends stack-native read-only lint and scanner tools', () => {
 });
 
 test('skill permits only explicit complementary local DAST after remediation', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Phase 9: Optional Local DAST Complementary Report/i);
   assert.match(docs, /after the user or coding agent has implemented/i);
@@ -741,7 +757,7 @@ test('skill permits only explicit complementary local DAST after remediation', (
 });
 
 test('documentation separates engine-orchestrated tools from agent-recommended tools honestly', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Engine-Orchestrated Tools/i);
   assert.match(docs, /Semgrep[\s\S]*npm audit[\s\S]*OSV-Scanner/i);
@@ -752,7 +768,7 @@ test('documentation separates engine-orchestrated tools from agent-recommended t
 });
 
 test('documentation describes vibe coding as heuristics rather than deterministic authorship scoring', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Vibe Coding Heuristics/i);
   assert.match(docs, /does not prove AI authorship/i);
@@ -761,7 +777,7 @@ test('documentation describes vibe coding as heuristics rather than deterministi
 });
 
 test('skill defines compatible scatter-gather security subagent orchestration', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Scatter-Gather Security Subagent Orchestration/i);
   assert.match(docs, /Phase 0[\s\S]*Phase 1[\s\S]*sequential gate/i);
@@ -775,7 +791,7 @@ test('skill defines compatible scatter-gather security subagent orchestration', 
 });
 
 test('skill defines subagent orchestration DoD and non-negotiable rules', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Subagent Orchestration DoD/i);
   assert.match(docs, /csreview-reports\/\.partials\/<subagent>\.json/);
@@ -810,7 +826,7 @@ test('README exposes the canonical SKILL.md for GitHub landing review', () => {
 });
 
 test('documentation aligns report handoff names and avoids exact patch instructions', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.doesNotMatch(docs, /Apply the corrected code exactly as shown/i);
   assert.doesNotMatch(docs, /@csreview review security-findings\.md/i);
@@ -821,7 +837,7 @@ test('documentation aligns report handoff names and avoids exact patch instructi
 });
 
 test('documentation requires global skill installation by default', () => {
-  const docs = `${fs.readFileSync('../README.md', 'utf8')}\n${fs.readFileSync('SKILL.md', 'utf8')}`;
+  const docs = readDocs();
 
   assert.match(docs, /Global Skill Installation/);
   assert.match(docs, /global agent skill/i);

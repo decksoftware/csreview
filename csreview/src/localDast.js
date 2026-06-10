@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { normalizeLocalPath, safeResolveInside } from './pathSafety.js';
+import { sanitizeAgentName } from './agentName.js';
 
 // Node's URL parser returns the bracketed form for IPv6 loopback (e.g. new URL('http://[::1]').hostname === '[::1]').
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
@@ -13,17 +14,6 @@ const SECURITY_HEADERS = [
   'referrer-policy',
   'permissions-policy',
 ];
-
-function sanitizeAgentName(agentName) {
-  const raw = String(agentName || 'codex')
-    .trim()
-    .toLowerCase();
-  const normalized = raw
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return normalized || 'codex';
-}
 
 function escapeHtml(value) {
   return String(value ?? '')

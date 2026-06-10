@@ -4,6 +4,7 @@ import path from 'path';
 import { glob } from 'glob';
 import { safeResolveInside } from './pathSafety.js';
 import { buildScannerIgnoreGlobs } from './ignore.js';
+import { EXTENSION_TO_TECH } from './languages.js';
 
 const SOURCE_EXTENSIONS = [
   'js',
@@ -73,70 +74,35 @@ const SOURCE_EXTENSIONS = [
 // both paths. Keep ignore.js side-effect-free so this top-level call is safe.
 const IGNORE_PATTERNS = buildScannerIgnoreGlobs();
 
-const EXTENSION_TO_TECH = {
-  js: 'JavaScript/TypeScript',
-  mjs: 'JavaScript/TypeScript',
-  cjs: 'JavaScript/TypeScript',
-  ts: 'JavaScript/TypeScript',
-  tsx: 'JavaScript/TypeScript',
-  jsx: 'JavaScript/TypeScript',
-  py: 'Python',
-  pyw: 'Python',
-  java: 'Java',
-  kt: 'Kotlin',
-  kts: 'Kotlin',
-  go: 'Go',
-  rs: 'Rust',
-  php: 'PHP',
-  phtml: 'PHP',
-  rb: 'Ruby',
-  erb: 'Ruby',
-  cs: 'C#',
-  cshtml: 'C#',
-  razor: 'C#',
-  c: 'C/C++',
-  cpp: 'C/C++',
-  cc: 'C/C++',
-  cxx: 'C/C++',
-  h: 'C/C++',
-  hpp: 'C/C++',
-  swift: 'Swift',
-  dart: 'Dart',
-  pas: 'Delphi',
-  pp: 'Delphi',
-  dpr: 'Delphi',
-  lpr: 'Delphi',
-  lfm: 'Delphi',
-  dfm: 'Delphi',
-  lua: 'Lua',
-  scala: 'Scala',
-  sc: 'Scala',
-  ex: 'Elixir',
-  exs: 'Elixir',
-  clj: 'Clojure',
-  cljs: 'Clojure',
-  vue: 'Vue',
-  svelte: 'Svelte',
-  html: 'HTML',
-  htm: 'HTML',
-  ejs: 'HTML Templates',
-  hbs: 'HTML Templates',
-  twig: 'HTML Templates',
-  pug: 'HTML Templates',
-  jade: 'HTML Templates',
-  sh: 'Shell',
-  bash: 'Shell',
-  zsh: 'Shell',
-  ps1: 'Shell',
-  bat: 'Shell',
-  cmd: 'Shell',
-  sql: 'SQL',
-  graphql: 'GraphQL',
-  gql: 'GraphQL',
-};
-
 function buildSourceGlobPattern() {
   return `**/*.{${SOURCE_EXTENSIONS.join(',')}}`;
+}
+
+// Discovery patterns match at ANY depth (`**/` prefix): monorepos keep configs,
+// manifests, and BaaS rules inside nested workspaces (apps/*, services/*,
+// packages/*), and IGNORE_PATTERNS already fences off node_modules and the
+// generated caches, so recursion does not reintroduce vendored noise.
+function recursivePatterns(patterns) {
+  return patterns.map((pattern) => `**/${pattern}`);
+}
+
+function pathDepth(filePath) {
+  return filePath.split('/').length;
+}
+
+// One glob walk per category (the glob library accepts a pattern array — far
+// cheaper than one walk per pattern), with /-normalized output so reports and
+// dedup keys are identical across platforms, and root-first ordering so
+// "find the project manifest" reads keep resolving to the root file.
+async function globUnique(patterns, rootDir) {
+  const matches = await glob(patterns, {
+    cwd: rootDir,
+    nodir: true,
+    dot: true,
+    ignore: IGNORE_PATTERNS,
+  });
+  const unique = [...new Set(matches.map((match) => match.replace(/\\/g, '/')))];
+  return unique.sort((a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b));
 }
 
 function readFileJson(filePath) {
@@ -193,170 +159,131 @@ function detectTechStack(files) {
   return Array.from(techSet);
 }
 
+// In a monorepo every workspace manifest contributes frameworks, so the
+// detectors below read ALL matching dep files, not just the first one found.
+function eachDepFile(depFiles, matcher) {
+  return depFiles.filter((f) => matcher(path.basename(f), f));
+}
+
 function detectFrameworksFromPackageJson(rootDir, depFiles) {
-  const frameworks = [];
-  const pkgPath = depFiles.find((f) => path.basename(f) === 'package.json');
+  const frameworks = new Set();
+  for (const pkgPath of eachDepFile(depFiles, (base) => base === 'package.json')) {
+    const pkg = readProjectJson(rootDir, pkgPath);
+    if (!pkg) continue;
 
-  if (!pkgPath) return frameworks;
+    const allDeps = {
+      ...pkg.dependencies,
+      ...pkg.devDependencies,
+      ...pkg.peerDependencies,
+    };
 
-  const pkg = readProjectJson(rootDir, pkgPath);
-  if (!pkg) return frameworks;
-
-  const allDeps = {
-    ...pkg.dependencies,
-    ...pkg.devDependencies,
-    ...pkg.peerDependencies,
-  };
-
-  if (allDeps['react']) frameworks.push('React');
-  if (allDeps['vue']) frameworks.push('Vue');
-  if (allDeps['@angular/core']) frameworks.push('Angular');
-  if (allDeps['svelte']) frameworks.push('Svelte');
-  if (allDeps['next']) frameworks.push('Next.js');
-  if (allDeps['nuxt']) frameworks.push('Nuxt');
-  if (allDeps['express']) frameworks.push('Express');
-  if (allDeps['fastify']) frameworks.push('Fastify');
-  if (allDeps['@nestjs/core']) frameworks.push('NestJS');
-  if (allDeps['react-native']) frameworks.push('React Native');
-  if (allDeps['expo']) frameworks.push('Expo');
-  if (allDeps['electron']) frameworks.push('Electron');
-  if (allDeps['@tauri-apps/api']) frameworks.push('Tauri');
-
-  return frameworks;
+    if (allDeps['react']) frameworks.add('React');
+    if (allDeps['vue']) frameworks.add('Vue');
+    if (allDeps['@angular/core']) frameworks.add('Angular');
+    if (allDeps['svelte']) frameworks.add('Svelte');
+    if (allDeps['next']) frameworks.add('Next.js');
+    if (allDeps['nuxt']) frameworks.add('Nuxt');
+    if (allDeps['express']) frameworks.add('Express');
+    if (allDeps['fastify']) frameworks.add('Fastify');
+    if (allDeps['@nestjs/core']) frameworks.add('NestJS');
+    if (allDeps['react-native']) frameworks.add('React Native');
+    if (allDeps['expo']) frameworks.add('Expo');
+    if (allDeps['electron']) frameworks.add('Electron');
+    if (allDeps['@tauri-apps/api']) frameworks.add('Tauri');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromRequirements(rootDir, depFiles) {
-  const frameworks = [];
-  const reqPath = depFiles.find((f) => path.basename(f) === 'requirements.txt');
-
-  if (!reqPath) return frameworks;
-
-  const lines = readProjectLines(rootDir, reqPath);
-  const content = lines.join('\n').toLowerCase();
-
-  if (content.includes('django')) frameworks.push('Django');
-  if (content.includes('flask')) frameworks.push('Flask');
-  if (content.includes('fastapi')) frameworks.push('FastAPI');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const reqPath of eachDepFile(depFiles, (base) => base === 'requirements.txt')) {
+    const content = readProjectLines(rootDir, reqPath).join('\n').toLowerCase();
+    if (content.includes('django')) frameworks.add('Django');
+    if (content.includes('flask')) frameworks.add('Flask');
+    if (content.includes('fastapi')) frameworks.add('FastAPI');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromPyproject(rootDir, depFiles) {
-  const frameworks = [];
-  const pyprojectPath = depFiles.find((f) => path.basename(f) === 'pyproject.toml');
-
-  if (!pyprojectPath) return frameworks;
-
-  const content = readProjectContent(rootDir, pyprojectPath).toLowerCase();
-
-  if (content.includes('django')) frameworks.push('Django');
-  if (content.includes('flask')) frameworks.push('Flask');
-  if (content.includes('fastapi')) frameworks.push('FastAPI');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const pyprojectPath of eachDepFile(depFiles, (base) => base === 'pyproject.toml')) {
+    const content = readProjectContent(rootDir, pyprojectPath).toLowerCase();
+    if (content.includes('django')) frameworks.add('Django');
+    if (content.includes('flask')) frameworks.add('Flask');
+    if (content.includes('fastapi')) frameworks.add('FastAPI');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromComposer(rootDir, depFiles) {
-  const frameworks = [];
-  const composerPath = depFiles.find((f) => path.basename(f) === 'composer.json');
-
-  if (!composerPath) return frameworks;
-
-  const composer = readProjectJson(rootDir, composerPath);
-  if (!composer) return frameworks;
-
-  const allDeps = {
-    ...composer.require,
-    ...composer['require-dev'],
-  };
-
-  if (allDeps && allDeps['laravel/framework']) frameworks.push('Laravel');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const composerPath of eachDepFile(depFiles, (base) => base === 'composer.json')) {
+    const composer = readProjectJson(rootDir, composerPath);
+    if (!composer) continue;
+    const allDeps = {
+      ...composer.require,
+      ...composer['require-dev'],
+    };
+    if (allDeps && allDeps['laravel/framework']) frameworks.add('Laravel');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromGemfile(rootDir, depFiles) {
-  const frameworks = [];
-  const gemfilePath = depFiles.find((f) => path.basename(f) === 'Gemfile');
-
-  if (!gemfilePath) return frameworks;
-
-  const lines = readProjectLines(rootDir, gemfilePath);
-  const content = lines.join('\n').toLowerCase();
-
-  if (content.includes("'rails'") || content.includes('"rails"')) frameworks.push('Rails');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const gemfilePath of eachDepFile(depFiles, (base) => base === 'Gemfile')) {
+    const content = readProjectLines(rootDir, gemfilePath).join('\n').toLowerCase();
+    if (content.includes("'rails'") || content.includes('"rails"')) frameworks.add('Rails');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromPomXml(rootDir, depFiles) {
-  const frameworks = [];
-  const pomPath = depFiles.find((f) => path.basename(f) === 'pom.xml');
-
-  if (!pomPath) return frameworks;
-
-  const content = readProjectContent(rootDir, pomPath).toLowerCase();
-
-  if (content.includes('spring-boot') || content.includes('springframework')) frameworks.push('Spring');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const pomPath of eachDepFile(depFiles, (base) => base === 'pom.xml')) {
+    const content = readProjectContent(rootDir, pomPath).toLowerCase();
+    if (content.includes('spring-boot') || content.includes('springframework')) frameworks.add('Spring');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromGradle(rootDir, depFiles) {
-  const frameworks = [];
-  const gradlePath = depFiles.find((f) => {
-    const base = path.basename(f);
-    return base === 'build.gradle' || base === 'build.gradle.kts';
-  });
-
-  if (!gradlePath) return frameworks;
-
-  const content = readProjectContent(rootDir, gradlePath).toLowerCase();
-
-  if (content.includes('spring-boot') || content.includes('org.springframework')) frameworks.push('Spring');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const gradlePath of eachDepFile(depFiles, (base) => base === 'build.gradle' || base === 'build.gradle.kts')) {
+    const content = readProjectContent(rootDir, gradlePath).toLowerCase();
+    if (content.includes('spring-boot') || content.includes('org.springframework')) frameworks.add('Spring');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromGoMod(rootDir, depFiles) {
-  const frameworks = [];
-  const goModPath = depFiles.find((f) => path.basename(f) === 'go.mod');
-
-  if (!goModPath) return frameworks;
-
-  const content = readProjectContent(rootDir, goModPath);
-
-  if (content.includes('gin-gonic/gin')) frameworks.push('Gin');
-  if (content.includes('labstack/echo')) frameworks.push('Echo');
-  if (content.includes('gofiber/fiber')) frameworks.push('Fiber');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const goModPath of eachDepFile(depFiles, (base) => base === 'go.mod')) {
+    const content = readProjectContent(rootDir, goModPath);
+    if (content.includes('gin-gonic/gin')) frameworks.add('Gin');
+    if (content.includes('labstack/echo')) frameworks.add('Echo');
+    if (content.includes('gofiber/fiber')) frameworks.add('Fiber');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromCsproj(rootDir, depFiles) {
-  const frameworks = [];
-  const csprojPath = depFiles.find((f) => path.extname(f) === '.csproj');
-
-  if (!csprojPath) return frameworks;
-
-  const content = readProjectContent(rootDir, csprojPath);
-
-  if (content.includes('Microsoft.AspNetCore')) frameworks.push('ASP.NET');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const csprojPath of eachDepFile(depFiles, (base, full) => path.extname(full) === '.csproj')) {
+    const content = readProjectContent(rootDir, csprojPath);
+    if (content.includes('Microsoft.AspNetCore')) frameworks.add('ASP.NET');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromPubspec(rootDir, depFiles) {
-  const frameworks = [];
-  const pubspecPath = depFiles.find((f) => path.basename(f) === 'pubspec.yaml');
-
-  if (!pubspecPath) return frameworks;
-
-  const content = readProjectContent(rootDir, pubspecPath).toLowerCase();
-
-  if (content.includes('flutter')) frameworks.push('Flutter');
-
-  return frameworks;
+  const frameworks = new Set();
+  for (const pubspecPath of eachDepFile(depFiles, (base) => base === 'pubspec.yaml')) {
+    const content = readProjectContent(rootDir, pubspecPath).toLowerCase();
+    if (content.includes('flutter')) frameworks.add('Flutter');
+  }
+  return [...frameworks];
 }
 
 function detectFrameworksFromConfigFiles(rootDir, configFiles, files) {
@@ -513,152 +440,90 @@ export function readFileSafe(filePath) {
   }
 }
 
+const CONFIG_FILE_PATTERNS = [
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.production',
+  '.env.staging',
+  '.env.test',
+  'docker-compose.yml',
+  'docker-compose.yaml',
+  'Dockerfile',
+  '.dockerignore',
+  'nginx.conf',
+  'apache2.conf',
+  '.htaccess',
+  '.github/workflows/*.yml',
+  '.github/workflows/*.yaml',
+  '.gitlab-ci.yml',
+  'Jenkinsfile',
+  '.circleci/config.yml',
+  'bitbucket-pipelines.yml',
+  '*.tf',
+  '*.tfvars',
+  '.eslintrc',
+  '.eslintrc.*',
+  'security.txt',
+  'package.json',
+  'tsconfig.json',
+  'webpack.config.*',
+  'vite.config.*',
+  'next.config.*',
+  'nuxt.config.*',
+  'angular.json',
+  'vue.config.*',
+  'svelte.config.*',
+  'gatsby-config.*',
+  '*.pem',
+  '*.crt',
+  '*.key',
+];
+
+const DEP_FILE_PATTERNS = [
+  'package.json',
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'requirements.txt',
+  'pyproject.toml',
+  'setup.py',
+  'setup.cfg',
+  'Pipfile',
+  'Pipfile.lock',
+  'poetry.lock',
+  'go.mod',
+  'go.sum',
+  'Cargo.toml',
+  'Cargo.lock',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'Gemfile',
+  'Gemfile.lock',
+  '*.gemspec',
+  'composer.json',
+  'composer.lock',
+  '*.csproj',
+  '*.sln',
+  'packages.config',
+  'nuget.config',
+  'pubspec.yaml',
+  'pubspec.lock',
+  'Package.swift',
+  '*.lpi',
+  '*.dproj',
+];
+
 export async function scanProject(rootDir) {
   console.log('Scanning project structure...');
 
-  const sourceGlob = buildSourceGlobPattern();
-
-  const sourceFiles = await glob(sourceGlob, {
-    cwd: rootDir,
-    nodir: true,
-    dot: true,
-    ignore: IGNORE_PATTERNS,
-  });
-
-  const configPatterns = [
-    '.env',
-    '.env.local',
-    '.env.development',
-    '.env.production',
-    '.env.staging',
-    '.env.test',
-    'docker-compose.yml',
-    'docker-compose.yaml',
-    'Dockerfile',
-    '.dockerignore',
-    'nginx.conf',
-    'apache2.conf',
-    '.htaccess',
-    '.github/workflows/*.yml',
-    '.github/workflows/*.yaml',
-    '.gitlab-ci.yml',
-    'Jenkinsfile',
-    '.circleci/config.yml',
-    'bitbucket-pipelines.yml',
-    '*.tf',
-    '*.tfvars',
-    '.eslintrc',
-    '.eslintrc.*',
-    'security.txt',
-    'package.json',
-    'tsconfig.json',
-    'webpack.config.*',
-    'vite.config.*',
-    'next.config.*',
-    'nuxt.config.*',
-    'angular.json',
-    'vue.config.*',
-    'svelte.config.*',
-    'gatsby-config.*',
-    '*.pem',
-    '*.crt',
-    '*.key',
-    'terraform/*.tf',
-    'terraform/*.tfvars',
-  ];
-
-  const configFiles = [];
-  for (const pattern of configPatterns) {
-    try {
-      const matches = await glob(pattern, {
-        cwd: rootDir,
-        nodir: true,
-        dot: true,
-        ignore: IGNORE_PATTERNS,
-      });
-      for (const match of matches) {
-        if (!configFiles.includes(match)) {
-          configFiles.push(match);
-        }
-      }
-    } catch {
-      // skip invalid patterns
-    }
-  }
-
-  const depPatterns = [
-    'package.json',
-    'package-lock.json',
-    'yarn.lock',
-    'pnpm-lock.yaml',
-    'requirements.txt',
-    'pyproject.toml',
-    'setup.py',
-    'setup.cfg',
-    'Pipfile',
-    'Pipfile.lock',
-    'poetry.lock',
-    'go.mod',
-    'go.sum',
-    'Cargo.toml',
-    'Cargo.lock',
-    'pom.xml',
-    'build.gradle',
-    'build.gradle.kts',
-    'Gemfile',
-    'Gemfile.lock',
-    '*.gemspec',
-    'composer.json',
-    'composer.lock',
-    '*.csproj',
-    '*.sln',
-    'packages.config',
-    'nuget.config',
-    'pubspec.yaml',
-    'pubspec.lock',
-    'Package.swift',
-    '*.lpi',
-    '*.dproj',
-  ];
-
-  const depFiles = [];
-  for (const pattern of depPatterns) {
-    try {
-      const matches = await glob(pattern, {
-        cwd: rootDir,
-        nodir: true,
-        dot: true,
-        ignore: IGNORE_PATTERNS,
-      });
-      for (const match of matches) {
-        if (!depFiles.includes(match)) {
-          depFiles.push(match);
-        }
-      }
-    } catch {
-      // skip invalid patterns
-    }
-  }
-
-  const baasPatterns = getBaasFilePatterns();
-  const baasFiles = [];
-  for (const pattern of baasPatterns) {
-    try {
-      const matches = await glob(pattern, {
-        cwd: rootDir,
-        nodir: true,
-        dot: true,
-        ignore: IGNORE_PATTERNS,
-      });
-      for (const match of matches) {
-        if (!baasFiles.includes(match)) {
-          baasFiles.push(match);
-        }
-      }
-    } catch {
-      // skip invalid patterns
-    }
-  }
+  const [sourceFiles, configFiles, depFiles, baasFiles] = await Promise.all([
+    globUnique([buildSourceGlobPattern()], rootDir),
+    globUnique(recursivePatterns(CONFIG_FILE_PATTERNS), rootDir),
+    globUnique(recursivePatterns(DEP_FILE_PATTERNS), rootDir),
+    globUnique(recursivePatterns(getBaasFilePatterns()), rootDir),
+  ]);
 
   const techStack = detectTechStack(sourceFiles);
 

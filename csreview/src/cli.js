@@ -11,8 +11,20 @@ import { generateDumpGuide, sanitizeAgentName } from './dumpGuide.js';
 import { checkForUpdate } from './updateCheck.js';
 import { checkToolFreshness } from './toolFreshness.js';
 import { makeSecurityToolGatherer } from './provisionRuntime.js';
+import { parseCliArgs, countFindingsAtOrAbove } from './cliArgs.js';
 
 const args = process.argv.slice(2);
+
+// Strict parsing: an unknown or mistyped flag is a hard error (a silently
+// ignored `--basline` would run the scan without the baseline and "pass").
+let cli;
+try {
+  cli = parseCliArgs(args);
+} catch (err) {
+  console.error(chalk.red(`\n  Error: ${err.message}`));
+  console.error(chalk.gray('  Run csreview --help for the supported options.\n'));
+  process.exit(1);
+}
 
 /** Read the installed CSReview version from package.json (best-effort). */
 function readCurrentVersion() {
@@ -29,7 +41,7 @@ function readCurrentVersion() {
  * reviews the change before updating. Skipped with --no-update-check.
  */
 async function runUpdatePreflight() {
-  if (args.includes('--no-update-check')) return;
+  if (cli.noUpdateCheck) return;
   try {
     const result = await checkForUpdate(readCurrentVersion(), { timeoutMs: 4000 });
     if (result.checked && result.updateAvailable) {
@@ -77,9 +89,13 @@ async function runToolFreshness(tools) {
   }
 }
 
-if (args.includes('--doctor')) {
-  const targetArg = args.find((arg) => !arg.startsWith('-'));
-  const targetDir = resolve(targetArg || '.');
+if (cli.version) {
+  console.log(readCurrentVersion() || 'unknown');
+  process.exit(0);
+}
+
+if (cli.doctor) {
+  const targetDir = resolve(cli.targetArg || '.');
   const tools = await checkExternalTools(targetDir);
 
   console.log(chalk.bold.cyan('\n  CSReview Tool Doctor\n'));
@@ -98,7 +114,7 @@ if (args.includes('--doctor')) {
     console.log(`  ${name.padEnd(12)} ${status} (${requirement}) - ${detail}`);
   }
 
-  if (!args.includes('--no-tool-check')) {
+  if (!cli.noToolCheck) {
     await runToolFreshness(tools);
   }
 
@@ -107,7 +123,7 @@ if (args.includes('--doctor')) {
   process.exit(0);
 }
 
-if (args.includes('--help') || args.includes('-h') || args.length === 0) {
+if (cli.help || args.length === 0) {
   console.log(`
 ${chalk.bold.cyan('CSReview')} - Development-time local workspace security alignment for AI coding agents
 
@@ -118,6 +134,7 @@ ${chalk.bold('USAGE:')}
 ${chalk.bold('OPTIONS:')}
   --output, -o <dir>    Output directory for reports (default: <target>/csreview-reports/)
   --agent-name <name>   Prefix report files with the coding agent name (default: codex)
+  --fail-on <severity>  Exit 1 when findings at or above this level remain (critical|high|medium|low) - CI gate
   --local-dast-url <url> Run complementary local-only DAST against localhost/127.0.0.1
   --confirm-local-dast  Required confirmation flag for --local-dast-url
   --strict-partials     Fail when csreview-reports/.partials/ does not reconcile
@@ -125,15 +142,22 @@ ${chalk.bold('OPTIONS:')}
   --update-baseline     Write/refresh the baseline file from this run (with --baseline or default .csreview-baseline.json)
   --dump-guide          Also generate a read-only per-backend local DB dump guide (auto with --local-dast-url)
   --provision-tools     Opt-in: run stack-native security tools (Gitleaks/Trivy/Bandit/gosec) and, if missing, download them from OFFICIAL sources (SHA-256 verified) into an isolated, gitignored .csreview/bin/. Higher fidelity, fewer false positives.
+  --tool-timeout <s>    Per-tool timeout in seconds for Semgrep/audits/OSV (default: 120)
+  --semgrep-config <c>  Semgrep config to use instead of "auto" (local rules path or registry ref; enables offline scans)
   --no-update-check     Skip the pre-flight CSReview self-update check
   --doctor              Check external security tools (and their freshness) without scanning source code
+  --version, -v         Print the installed CSReview version
   --help, -h            Show this help message
+
+  Unknown flags are an error (strict parsing): a mistyped option aborts the scan
+  instead of silently changing what is audited.
 
 ${chalk.bold('EXAMPLES:')}
   csreview .
   csreview /path/to/project
   csreview . --output ./security-reports
   csreview . --agent-name claude
+  csreview . --fail-on high        # CI: exit 1 if HIGH/CRITICAL findings remain
   csreview . --local-dast-url http://localhost:3000 --confirm-local-dast
   csreview --doctor .
 
@@ -162,37 +186,22 @@ ${chalk.bold('SECURITY TOOLS:')}
   process.exit(0);
 }
 
-const targetDir = resolve(args[0]);
-let outputDir = null;
-let agentName = process.env.CSREVIEW_AGENT_NAME || 'codex';
-let localDastUrl = null;
-const strictPartials = args.includes('--strict-partials');
-
-const outputIdx = args.findIndex((a) => a === '--output' || a === '-o');
-if (outputIdx !== -1 && args[outputIdx + 1]) {
-  outputDir = resolve(args[outputIdx + 1]);
+if (!cli.targetArg) {
+  console.error(chalk.red('\n  Error: missing <target-directory>. Run csreview --help for usage.\n'));
+  process.exit(1);
 }
 
-const agentNameIdx = args.findIndex((a) => a === '--agent-name');
-if (agentNameIdx !== -1 && args[agentNameIdx + 1]) {
-  agentName = args[agentNameIdx + 1];
-}
+const targetDir = resolve(cli.targetArg);
+const outputDir = cli.output ? resolve(cli.output) : null;
+const agentName = cli.agentName || process.env.CSREVIEW_AGENT_NAME || 'codex';
+const localDastUrl = cli.localDastUrl;
+const localDastConfirmed = cli.confirmLocalDast;
+const strictPartials = cli.strictPartials;
 
-const localDastIdx = args.findIndex((a) => a === '--local-dast-url');
-if (localDastIdx !== -1 && args[localDastIdx + 1]) {
-  localDastUrl = args[localDastIdx + 1];
-}
-const localDastConfirmed = args.includes('--confirm-local-dast');
+const baselinePath = cli.baseline ? resolve(cli.baseline) : null;
+const updateBaselinePath = cli.updateBaseline ? baselinePath || resolve(targetDir, DEFAULT_BASELINE_FILE) : null;
 
-let baselinePath = null;
-const baselineIdx = args.findIndex((a) => a === '--baseline');
-if (baselineIdx !== -1 && args[baselineIdx + 1] && !args[baselineIdx + 1].startsWith('-')) {
-  baselinePath = resolve(args[baselineIdx + 1]);
-}
-const updateBaseline = args.includes('--update-baseline');
-const updateBaselinePath = updateBaseline ? baselinePath || resolve(targetDir, DEFAULT_BASELINE_FILE) : null;
-
-const provisionTools = args.includes('--provision-tools');
+const provisionTools = cli.provisionTools;
 
 if (!existsSync(targetDir)) {
   console.error(chalk.red(`\n  Error: Directory not found: ${targetDir}\n`));
@@ -236,6 +245,8 @@ try {
     strictPartials,
     baselinePath,
     updateBaselinePath,
+    toolTimeoutMs: cli.toolTimeoutMs || undefined,
+    semgrepConfig: cli.semgrepConfig || undefined,
     gatherSecurityTools: securityToolGatherer,
   });
 
@@ -340,7 +351,7 @@ try {
 
   // Phase 9 helper: a read-only per-backend "safe local dump" guide so the user
   // can prepare an isolated local copy before any optional local DAST.
-  const wantDumpGuide = args.includes('--dump-guide') || Boolean(localDastUrl);
+  const wantDumpGuide = cli.dumpGuide || Boolean(localDastUrl);
   if (wantDumpGuide) {
     try {
       const projectInfo = await scanProject(targetDir);
@@ -393,6 +404,22 @@ try {
   }
 
   console.log('');
+
+  // CI gate: with --fail-on <severity>, exit non-zero when the report contains
+  // findings at or above that level, so a pipeline can block the merge. Reports
+  // are always written first — the gate only changes the exit code.
+  if (cli.failOn) {
+    const gated = countFindingsAtOrAbove(result.severityCounts, cli.failOn);
+    if (gated > 0) {
+      console.error(
+        chalk.red.bold(
+          `  Failing: ${gated} finding(s) at or above ${cli.failOn} (--fail-on ${cli.failOn.toLowerCase()}).\n`,
+        ),
+      );
+      process.exit(1);
+    }
+    console.log(chalk.green(`  Gate passed: no findings at or above ${cli.failOn} (--fail-on).\n`));
+  }
 } catch (err) {
   console.error(chalk.red(`\n  Fatal Error: ${err.message}\n`));
   if (process.env.DEBUG) console.error(err.stack);
