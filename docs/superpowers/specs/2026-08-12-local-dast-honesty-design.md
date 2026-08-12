@@ -96,4 +96,3 @@ The CLI reports suspected, clean, and inconclusive counts separately. A DAST pha
 - OPTIONS 405/501, 5xx, timeout, and network failure are inconclusive.
 - A representative successful response that denies the hostile origin is clean only for the stated CORS check.
 - Existing confirmation, loopback, URL-credential, redirect, and report-output guards remain covered by regression tests.
-

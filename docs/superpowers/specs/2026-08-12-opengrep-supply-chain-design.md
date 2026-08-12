@@ -94,11 +94,10 @@ The npm package `files` list includes `rules/` and license notices. Package keyw
 - The default scan succeeds with network access disabled after provisioning.
 - A remote `--opengrep-config`, `auto`, or registry name is rejected before process execution.
 - The vulnerable and safe fixtures prove the shipped rules behave as intended.
-- A repository-wide case-insensitive search finds no Semgrep engine, option, workflow, install instruction, or supported-tool claim.
+- A repository-wide case-insensitive search of active source, package metadata, user documentation, and workflows finds no Semgrep engine, option, install instruction, or supported-tool claim. Immutable migration specifications and third-party attribution metadata are excluded from this assertion.
 
 ## References
 
 - OpenGrep release: <https://github.com/opengrep/opengrep/releases/tag/v1.26.0>
 - OpenGrep repository: <https://github.com/opengrep/opengrep>
 - GitLab SAST rules seed: <https://gitlab.com/gitlab-org/security-products/sast-rules/-/releases/v2.9.2>
-

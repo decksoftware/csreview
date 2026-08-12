@@ -103,4 +103,3 @@ Malformed optional findings produce visible source diagnostics. A failure of the
 - Representative API keys, bearer tokens, cookies, connection strings, and symbol-heavy passwords are absent from HTML, Markdown, SARIF, embedded JSON, and CLI diagnostics.
 - Unsafe URI schemes never become clickable.
 - Reports contain no compliance `PASS` or `FAIL` verdict and keep Top 10 separate from ASVS.
-

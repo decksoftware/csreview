@@ -42,13 +42,15 @@ The return value uses `score: null` unless status is `COMPLETE`. It may expose c
 
 `--require-tools <comma-separated>` accepts `opengrep`, `osv-scanner`, `package-audit`, `gitleaks`, `trivy`, `gosec`, and `bandit`. Unknown names are hard errors.
 
+An explicitly required tool that is not applicable to the discovered stack is an unmet requirement with a `not_applicable` diagnostic. This prevents a misspelled or inappropriate CI policy from appearing satisfied without executing anything.
+
 - A normal local run writes and displays a partial report without claiming success.
 - `--fail-on <severity>` fails when the threshold is reached or the assessment is not `COMPLETE`.
 - `--require-tools` fails when any named tool is unavailable or failed, independent of finding count.
 - Reports are written before a finding or coverage gate changes the exit status.
 - CLI output never prints “No vulnerabilities detected” for a partial run. It prints “No reportable findings observed in the completed checks; assessment incomplete.”
 
-All nonfatal gates preserve exit code `1` for compatibility. Fatal exceptions also exit `1`, while their message and assessment artifact distinguish the cause.
+All nonfatal gates preserve exit code `1` for compatibility. Fatal exceptions also exit `1`; the fatal message and, when report persistence is still possible, the assessment artifact distinguish the cause.
 
 ## Recursive SCA plan
 
@@ -107,4 +109,3 @@ Security debt should normally use baseline v2 exceptions rather than broad path 
 - An ambiguous v1 baseline suppresses nothing.
 - The adversarial `*a*a*a*a*a*a*a*a*a*a*a*a*a*a*b` glob completes within a deterministic small bound.
 - Project ignore is inert in CI without explicit opt-in.
-
