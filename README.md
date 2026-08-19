@@ -11,9 +11,9 @@
 One command runs the whole pipeline deterministically:
 
 1. **Discovers** the workspace (source, configs, `.env`, lockfiles, IaC, BaaS rules — recursively, monorepo-aware) and detects the stack.
-2. **Orchestrates real security tools** — Semgrep (required baseline), the lockfile-selected package audit (npm/pnpm/bun), OSV-Scanner, and (opt-in) Gitleaks, Trivy, gosec, Bandit — and parses their JSON output.
+2. **Orchestrates real security tools** — Semgrep (required baseline), one root package audit selected from the detected npm/pnpm/bun lockfile, OSV-Scanner, and (opt-in) Gitleaks, Trivy, gosec, Bandit — and parses their JSON output.
 3. **Adds its own heuristic detector** for secrets (redacted in evidence), config/IaC/BaaS misconfigurations, and common vulnerability shapes — a complementary net, not a taint-tracking SAST.
-4. **Corroborates**: findings are deduplicated across sources by `file:line:CWE`; evidence seen by more than one independent source is promoted to `CONFIRMED`, and every finding carries an honest confidence label (`CONFIRMED` / `TOOL-ONLY` / heuristic `HIGH|MEDIUM|LOW`).
+4. **Corroborates**: findings are deduplicated across sources by `file:line:CWE`; matching evidence from the built-in detector and at least one additional normalized source is promoted to `CONFIRMED`, and every finding carries an explicit confidence label (`CONFIRMED` / `TOOL-ONLY` / heuristic `HIGH|MEDIUM|LOW`).
 5. **Reports for both audiences**: an HTML report for humans, a Markdown report for coding agents to plan remediation from, and SARIF 2.1.0 for CI — plus `--fail-on <severity>` so a pipeline can block merges, and `--baseline` so CI fails only on NEW findings.
 
 What it does **not** do — said up front: it does not modify your code, it does not probe deployed systems, it does not compute compliance verdicts (compliance fields are CWE correlation — indicative, never an audited compliance verification), and a clean report is evidence of absence-of-detection, not proof of security.
@@ -31,14 +31,14 @@ CSReview's fidelity — results faithful to the objective, with **far fewer fals
 | **Bandit** | Python security (AST) — *run if already installed* | https://github.com/PyCQA/bandit |
 | **gosec** | Go security (AST) | https://github.com/securego/gosec |
 
-> Gitleaks, Trivy, and gosec are single binaries CSReview can auto-download from their official releases (alongside the already-supported Semgrep and OSV-Scanner). **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`).
+> With `--provision-tools`, CSReview can auto-download **Gitleaks, Trivy, and gosec** from their official releases. **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`). Semgrep and OSV-Scanner are detected on `PATH` and must be installed separately.
 
-**These tools need to be installed for a faithful result — and CSReview can install them for you, with your consent.** If a tool is not already on your system, opt in with **`--provision-tools`** and CSReview will:
+For the opt-in stack-native tools, **`--provision-tools`** tells CSReview to:
 
 - download each tool **only from its official release page** (the sources above), pinned to the official host;
 - **verify its SHA-256 checksum before running anything** (a mismatch — or any non-official host — is rejected and never executed);
 - install into an **isolated, gitignored `.csreview/bin/`** inside your project — never globally, never with `sudo`, never as a project dependency, and **never modifying your source code**;
-- **fail open**: if a tool can't be installed (offline, unsupported platform), the scan still runs in lower-confidence "Agent-Only" mode.
+- **fail open**: if an optional tool cannot be installed (offline or unsupported platform), the remaining available scanners and heuristics still run, and skipped tools are disclosed.
 
 Prefer to manage them yourself? Install the tools and CSReview will use whatever is already on your `PATH`; or run without them. Either way, the report tells you which tools ran and which were skipped.
 
@@ -59,7 +59,45 @@ csreview /path/to/project --agent-name claude
 csreview . --agent-name ci --fail-on high      # exit 1 if HIGH/CRITICAL remain
 ```
 
-Key CLI options: `--fail-on <severity>` (CI gate) · `--baseline <file>` / `--update-baseline` (fail only on NEW findings) · `--provision-tools` (opt-in tool install, SHA-256 verified) · `--tool-timeout <s>` · `--semgrep-config <ref>` (local rules, offline-friendly) · `--local-dast-url <url> --confirm-local-dast` (optional post-remediation local probe) · `--doctor` · `--version`. Unknown flags are hard errors — a mistyped option aborts instead of silently changing what is audited. A `.csreview-ignore` file (gitignore-style) suppresses report findings for matching paths without touching your project.
+## Current configuration
+
+The package manifest currently defines **CSReview 0.1.4**, ESM, with **Node.js 18 or newer**. A normal scan writes static reports to `<target>/csreview-reports/` using the `codex` prefix unless another agent name is configured.
+
+### CLI options
+
+| Option | Current behavior |
+| --- | --- |
+| `--output, -o <dir>` | Changes the static-report output directory. Default: `<target>/csreview-reports/`. |
+| `--agent-name <name>` | Prefixes report filenames. Default: `CSREVIEW_AGENT_NAME`, then `codex`. |
+| `--fail-on <severity>` | Exits with code 1 after writing reports when `critical`, `high`, `medium`, or `low` findings at or above the threshold remain. |
+| `--baseline <file>` | Suppresses matching known-finding fingerprints from reports and the CI gate. |
+| `--update-baseline` | Writes or refreshes the selected baseline; without `--baseline`, writes `<target>/.csreview-baseline.json`. |
+| `--strict-partials` | Fails when `<output>/.partials/` exists but its subagent results cannot be reconciled. |
+| `--provision-tools` | Runs the relevant Gitleaks, Trivy, gosec, and Bandit checks. Missing Gitleaks/Trivy/gosec binaries are downloaded from official releases and SHA-256 verified; Bandit is used only if installed. |
+| `--tool-timeout <seconds>` | Sets the per-tool timeout for Semgrep, package audit, and OSV-Scanner. Default: 120 seconds. |
+| `--semgrep-config <ref>` | Replaces Semgrep's `auto` config with a local path or registry reference; explicit configs also run with Semgrep metrics disabled. |
+| `--dump-guide` | Adds `<agent>_db-dump-guide.html`; this is also generated automatically with local DAST. |
+| `--local-dast-url <url>` | Runs the optional loopback-only header/CORS probe after the static scan. Accepts only `localhost`, `127.0.0.1`, or `[::1]`. |
+| `--confirm-local-dast` | Mandatory explicit confirmation for `--local-dast-url`. |
+| `--no-update-check` | Skips the read-only, fail-open CSReview update advisory. |
+| `--doctor [target]` | Checks Semgrep, the lockfile-selected package-audit tool, OSV-Scanner, and tool freshness without scanning source. |
+| `--no-tool-check` | With `--doctor`, skips the online freshness comparison while retaining local availability checks. |
+| `--version, -v` / `--help, -h` | Prints the installed version or CLI help. |
+
+Unknown flags are hard errors: a mistyped option aborts instead of silently changing what is audited.
+
+### Files and environment
+
+| Configuration | Current behavior |
+| --- | --- |
+| `.csreview-ignore` | Optional gitignore-style rules at the target root. They suppress matching findings in reports without changing source files; `!` rules can re-include a built-in exclusion. |
+| `.csreview-baseline.json` | Default deterministic baseline written only when `--update-baseline` is requested without another path. |
+| `<output>/.partials/<subagent>.json` | Optional subagent input contract (`<output>` defaults to `csreview-reports`). The engine remains the single writer of final reports. |
+| `.csreview/bin/` | Isolated, gitignored cache used only for binaries provisioned with `--provision-tools`. |
+| `CSREVIEW_AGENT_NAME` | Default report prefix when `--agent-name` is omitted. |
+| `SEMGREP_ENABLE_VERSION_CHECK` | Defaults to `0` for Semgrep invocations to prevent version-check hangs; an explicit user value is preserved. |
+
+Static output is `<agent>_security-report.html`, `<agent>_security-findings.md`, and `<agent>_security.sarif`. Local DAST always writes its current and timestamped history reports inside `<target>/csreview-reports/`, even when the static scan uses a custom `--output` directory.
 
 ## Honest limits
 
