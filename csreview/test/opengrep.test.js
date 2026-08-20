@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -96,7 +106,7 @@ test('validateOpenGrepConfig accepts existing local paths and rejects remote or 
   const localRules = path.join(root, 'rules');
   mkdirSync(localRules);
 
-  assert.equal(validateOpenGrepConfig('./rules', { cwd: root }), localRules);
+  assert.equal(validateOpenGrepConfig('./rules', { cwd: root }), realpathSync(localRules));
   for (const value of ['auto', 'p/security-audit', 'https://example.test/rules.yml', 'registry-rule']) {
     assert.throws(
       () => validateOpenGrepConfig(value, { cwd: root }),
