@@ -40,6 +40,17 @@ function readDocs() {
   return [fs.readFileSync('../README.md', 'utf8'), fs.readFileSync('SKILL.md', 'utf8'), ...referenceDocs].join('\n');
 }
 
+function readTextTree(target) {
+  const resolved = path.resolve(target);
+  if (!fs.existsSync(resolved)) return '';
+  if (fs.statSync(resolved).isFile()) return fs.readFileSync(resolved, 'utf8');
+  return fs
+    .readdirSync(resolved, { withFileTypes: true })
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => readTextTree(path.join(resolved, entry.name)))
+    .join('\n');
+}
+
 function writeFile(root, relativePath, content) {
   const target = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -110,7 +121,7 @@ test('Windows .cmd wrapper rejects shell metacharacters only for cmd-backed tool
     /unsafe argument.*npm\.cmd/i,
   );
 
-  assert.doesNotThrow(() => validateWindowsCmdArgs('semgrep', ['scan', 'name&whoami'], 'win32'));
+  assert.doesNotThrow(() => validateWindowsCmdArgs('opengrep', ['scan', 'name&whoami'], 'win32'));
   assert.doesNotThrow(() => validateWindowsCmdArgs('npm.cmd', ['name&whoami'], 'linux'));
 });
 
@@ -175,7 +186,7 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   assert.ok(result.totalFindings > 0);
   assert.ok(result.findings.every((f) => f.file !== 'security-report.html'));
   assert.equal(result.toolResults.mode, 'Agent-Only');
-  assert.equal(result.toolResults.semgrep.available, false);
+  assert.equal(result.toolResults.opengrep.available, false);
   assert.equal(path.basename(result.reports.html), 'codex_security-report.html');
   assert.equal(path.basename(result.reports.markdown), 'codex_security-findings.md');
   assert.ok(fs.existsSync(result.reports.html));
@@ -192,6 +203,80 @@ test('runAnalysis ignores generated reports and emits tool metadata when tool ex
   assert.doesNotMatch(markdown, /Exploitation Scenario/);
 });
 
+test('runAnalysis consumes the injected OpenGrep result as its primary SAST output', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'out');
+  writeFile(root, 'src/app.js', 'export const safe = true;\n');
+  let calls = 0;
+
+  const result = await runAnalysis(root, {
+    outputDir,
+    runOpenGrepImpl: async (targetRoot, options) => {
+      calls += 1;
+      assert.equal(targetRoot, root);
+      assert.equal(options.provision, false);
+      return {
+        available: true,
+        required: true,
+        path: path.join(os.tmpdir(), 'trusted-opengrep'),
+        source: 'test-trusted',
+        sha256: '0'.repeat(64),
+        legacyCacheIgnored: false,
+        version: '1.26.0',
+        findings: [makeFinding({ id: 'OPENGREP_TEST', source: 'opengrep', name: 'Injected OpenGrep finding' })],
+        rawCount: 1,
+        error: null,
+        reason: undefined,
+        diagnostic: 'complete',
+        complete: true,
+        ruleErrorCount: 0,
+        skippedCount: 0,
+        skippedReasons: [],
+      };
+    },
+  });
+
+  const legacyKey = ['sem', 'grep'].join('');
+  assert.equal(calls, 1);
+  assert.equal(result.toolResults.opengrep.available, true);
+  assert.equal(result.toolResults.opengrep.version, '1.26.0');
+  assert.ok(result.findings.some((finding) => finding.source === 'opengrep'));
+  assert.equal(Object.hasOwn(result.toolResults, legacyKey), false);
+});
+
+test('runAnalysis exposes partial OpenGrep skips and never labels them Self-Hosted', async () => {
+  const root = makeTempProject();
+  const outputDir = path.join(root, 'out');
+  writeFile(root, 'src/app.js', 'export const safe = true;\n');
+
+  const result = await runAnalysis(root, {
+    outputDir,
+    runOpenGrepImpl: async () => ({
+      available: true,
+      required: true,
+      path: path.join(os.tmpdir(), 'trusted-opengrep'),
+      source: 'test-trusted',
+      sha256: '0'.repeat(64),
+      legacyCacheIgnored: false,
+      version: '1.26.0',
+      findings: [],
+      rawCount: 0,
+      error: null,
+      reason: undefined,
+      diagnostic: 'partial-skips',
+      complete: false,
+      ruleErrorCount: 0,
+      skippedCount: 2,
+      skippedReasons: ['size limit', 'generated file'],
+    }),
+  });
+
+  assert.notEqual(result.toolResults.mode, 'Self-Hosted');
+  assert.equal(result.toolResults.opengrep.diagnostic, 'partial-skips');
+  assert.match(fs.readFileSync(result.reports.markdown, 'utf8'), /OpenGrep Status.*PARTIAL.*2 skipped/i);
+  assert.match(fs.readFileSync(result.reports.html, 'utf8'), /OpenGrep PARTIAL.*2 skipped/i);
+});
+
 test('runAnalysis merges and reconciles canonical subagent partial findings', async () => {
   const root = makeTempProject();
   const outputDir = path.join(root, 'csreview-reports');
@@ -200,7 +285,7 @@ test('runAnalysis merges and reconciles canonical subagent partial findings', as
   const finding = makeFinding();
   fs.writeFileSync(
     path.join(partialsDir, 'auth.json'),
-    JSON.stringify({ findings: [finding], toolExecutions: ['semgrep'] }),
+    JSON.stringify({ findings: [finding], toolExecutions: ['opengrep'] }),
     'utf8',
   );
 
@@ -220,14 +305,14 @@ test('reconcilePartials flags invalid schemas, count mismatches, and duplicate t
   fs.mkdirSync(partialsDir, { recursive: true });
   fs.writeFileSync(
     path.join(partialsDir, 'auth.json'),
-    JSON.stringify({ findings: [{ ...makeFinding(), source: 'auth' }], toolExecutions: ['semgrep'] }),
+    JSON.stringify({ findings: [{ ...makeFinding(), source: 'auth' }], toolExecutions: ['opengrep'] }),
     'utf8',
   );
   fs.writeFileSync(
     path.join(partialsDir, 'data.json'),
     JSON.stringify({
       findings: [makeFinding({ id: 'SUBAGENT_2', line: 24, source: 'subagent:data' })],
-      toolExecutions: ['semgrep'],
+      toolExecutions: ['opengrep'],
     }),
     'utf8',
   );
@@ -237,7 +322,7 @@ test('reconcilePartials flags invalid schemas, count mismatches, and duplicate t
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /source: "subagent:<domain>"/);
   assert.match(result.errors.join('\n'), /Final subagent finding count/);
-  assert.match(result.errors.join('\n'), /semgrep.*executed 2 times/i);
+  assert.match(result.errors.join('\n'), /opengrep.*executed 2 times/i);
   assert.throws(() => reconcilePartials(outputDir, [], { strict: true }), /Partial reconciliation failed/);
 });
 
@@ -407,7 +492,7 @@ test('tool mode classifier exposes real self-hosted, hybrid, and agent-only stat
 
   assert.equal(
     classifyToolMode({
-      semgrep: available,
+      opengrep: available,
       npmAudit: available,
       osvScanner: available,
     }),
@@ -416,7 +501,7 @@ test('tool mode classifier exposes real self-hosted, hybrid, and agent-only stat
 
   assert.equal(
     classifyToolMode({
-      semgrep: available,
+      opengrep: available,
       npmAudit: skipped,
       osvScanner: available,
     }),
@@ -425,7 +510,7 @@ test('tool mode classifier exposes real self-hosted, hybrid, and agent-only stat
 
   assert.equal(
     classifyToolMode({
-      semgrep: available,
+      opengrep: available,
       npmAudit: missing,
       osvScanner: missing,
     }),
@@ -434,11 +519,29 @@ test('tool mode classifier exposes real self-hosted, hybrid, and agent-only stat
 
   assert.equal(
     classifyToolMode({
-      semgrep: missing,
+      opengrep: missing,
       npmAudit: skipped,
       osvScanner: missing,
     }),
     'Agent-Only',
+  );
+
+  assert.equal(
+    classifyToolMode({
+      opengrep: { available: true, diagnostic: 'partial-skips' },
+      npmAudit: available,
+      osvScanner: available,
+    }),
+    'Hybrid',
+  );
+
+  assert.equal(
+    classifyToolMode({
+      opengrep: { available: false, diagnostic: 'rule-errors' },
+      npmAudit: available,
+      osvScanner: available,
+    }),
+    'Hybrid',
   );
 });
 
@@ -663,33 +766,54 @@ test('deduplicateFindings merges detector and tool findings into confirmed evide
       references: ['https://example.test/detector'],
     },
     {
-      id: 'SEMGREP_1',
+      id: 'OPENGREP_1',
       severity: 'HIGH',
-      category: 'Semgrep',
-      name: 'Semgrep SQL Injection',
+      category: 'OpenGrep',
+      name: 'OpenGrep SQL Injection',
       file: 'src/app.js',
       line: 10,
       cwe: 'CWE-89',
       confidence: 'TOOL-ONLY',
-      references: ['https://example.test/semgrep'],
-      source: 'semgrep',
+      references: ['https://example.test/opengrep'],
+      source: 'opengrep',
     },
   ]);
 
   assert.equal(findings.length, 1);
   assert.equal(findings[0].severity, 'CRITICAL');
   assert.equal(findings[0].confidence, 'CONFIRMED');
-  assert.deepEqual(findings[0].sources, ['csreview-detector', 'semgrep']);
+  assert.deepEqual(findings[0].sources, ['csreview-detector', 'opengrep']);
   assert.equal(findings[0].duplicateCount, 2);
   assert.equal(findings[0].references.length, 2);
 });
 
-test('package metadata declares Semgrep as a required external tool', () => {
+test('active product surfaces retain only the OpenGrep SAST integration', () => {
+  const activeProduct = [
+    'src',
+    'test',
+    'rules',
+    'reference',
+    'docs',
+    'SKILL.md',
+    'package.json',
+    '../README.md',
+    '../SECURITY.md',
+    '../.github/workflows',
+  ]
+    .map(readTextTree)
+    .join('\n');
+  const legacyName = ['sem', 'grep'].join('');
+
+  assert.match(activeProduct, /OpenGrep/);
+  assert.doesNotMatch(activeProduct, new RegExp(legacyName, 'i'));
+});
+
+test('package metadata declares pinned OpenGrep as the required SAST tool', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const skillInstallation = pkg.csreview?.skillInstallation || {};
   const requiredTools = pkg.csreview?.requiredExternalTools || [];
   const recommendedTools = pkg.csreview?.recommendedExternalTools || [];
-  const semgrep = requiredTools.find((tool) => tool.name === 'semgrep');
+  const opengrep = requiredTools.find((tool) => tool.name === 'opengrep');
   const osvScanner = recommendedTools.find((tool) => tool.name === 'osv-scanner');
   const pnpmAudit = recommendedTools.find((tool) => tool.name === 'pnpm audit');
 
@@ -698,16 +822,17 @@ test('package metadata declares Semgrep as a required external tool', () => {
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.match(pkg.description, /development-time local workspace security alignment/i);
   assert.ok(pkg.keywords.includes('ai-agent-skill'));
-  assert.ok(pkg.keywords.includes('semgrep'));
+  assert.ok(pkg.keywords.includes('opengrep'));
   assert.equal(skillInstallation.scope, 'global-agent-environment');
   assert.match(skillInstallation.projectInstallPolicy, /never install inside the analyzed project/i);
   assert.ok(skillInstallation.globalSkillDirectories.includes('~/.codex/skills/csreview'));
-  assert.equal(pkg.engines.node, '>=18');
+  assert.equal(pkg.engines.node, '>=20');
   assert.equal(pkg.author, 'Deck Software / Márcio PS');
   assert.match(pkg.dependencies.glob, /^\^13\./);
-  assert.equal(semgrep?.required, true);
-  assert.match(semgrep.install.join('\n'), /pipx install semgrep/);
-  assert.equal(semgrep.verify, 'semgrep --version');
+  assert.equal(opengrep?.required, true);
+  assert.equal(opengrep?.version, '1.26.0');
+  assert.match(opengrep.install.join('\n'), /--provision-tools/);
+  assert.equal(opengrep.verify, 'opengrep --version');
   assert.equal(osvScanner?.purpose, 'multi-ecosystem dependency vulnerability scanning');
   assert.match(pnpmAudit?.purpose, /pnpm-lock\.yaml/);
   assert.equal(pnpmAudit?.verify, 'pnpm --version');
@@ -760,7 +885,7 @@ test('documentation separates engine-orchestrated tools from agent-recommended t
   const docs = readDocs();
 
   assert.match(docs, /Engine-Orchestrated Tools/i);
-  assert.match(docs, /Semgrep[\s\S]*npm audit[\s\S]*OSV-Scanner/i);
+  assert.match(docs, /OpenGrep[\s\S]*npm audit[\s\S]*OSV-Scanner/i);
   assert.match(docs, /Agent-Recommended Stack-Native Tools/i);
   assert.match(docs, /not parsed by the npm engine/i);
   assert.match(docs, /Self-Hosted[\s\S]*all relevant engine-orchestrated tools/i);
@@ -804,7 +929,7 @@ test('skill defines subagent orchestration DoD and non-negotiable rules', () => 
   assert.match(docs, /Non-negotiable rules/i);
 });
 
-test('code and docs do not contain stale typo or Semgrep generic report excludes', () => {
+test('code and docs do not contain stale typo or generic report excludes', () => {
   const detector = fs.readFileSync('src/detector.js', 'utf8');
   const index = fs.readFileSync('src/index.js', 'utf8');
 

@@ -1,0 +1,74 @@
+name: OpenGrep
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "47 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  OPENGREP_ENABLE_VERSION_CHECK: "0"
+  OPENGREP_VERSION: "1.26.0"
+  OPENGREP_SHA256: "40c21299eeddabf743b856daa843d24f9d4a027130671cd45b3b21776fd9ab26"
+  OPENGREP_URL: "https://github.com/opengrep/opengrep/releases/download/v1.26.0/opengrep_manylinux_x86"
+
+jobs:
+  opengrep:
+    name: OpenGrep 1.26.0 offline SARIF
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: csreview/package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci
+        working-directory: csreview
+
+      - name: Download and verify approved OpenGrep artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --proto '=https' --tlsv1.2 "$OPENGREP_URL" --output "$RUNNER_TEMP/opengrep"
+          printf '%s  %s\n' "$OPENGREP_SHA256" "$RUNNER_TEMP/opengrep" | sha256sum --check --strict
+          chmod 0700 "$RUNNER_TEMP/opengrep"
+          "$RUNNER_TEMP/opengrep" --version
+
+      - name: Validate bundled rules against safe and vulnerable fixtures
+        shell: bash
+        env:
+          CSREVIEW_OPENGREP_BIN: ${{ runner.temp }}/opengrep
+        run: node --test test/opengrep.test.js
+        working-directory: csreview
+
+      - name: Run OpenGrep with bundled offline rulepack
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/opengrep" scan \
+            --config csreview/rules \
+            --disable-version-check \
+            --sarif \
+            --output opengrep.sarif \
+            --exclude node_modules \
+            --exclude csreview-reports \
+            .
+
+      - name: Upload OpenGrep SARIF
+        uses: github/codeql-action/upload-sarif@988661ebb5e81487b3fb31b2185d2856c0a10679 # v4
+        if: success() && hashFiles('opengrep.sarif') != ''
+        with:
+          sarif_file: opengrep.sarif

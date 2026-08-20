@@ -23,6 +23,7 @@ security-findings.md
 **/*_security-findings.md
 *_security.sarif
 **/*_security.sarif
+opengrep.sarif
 *_local-dast-report*.html
 *_local-dast-findings*.md
 **/*_local-dast-report*.html
@@ -36,3 +37,6 @@ CSREVIEW-ANALISES*.md
 *.log
 .DS_Store
 Thumbs.db
+
+# Local isolated feature worktrees
+.worktrees/

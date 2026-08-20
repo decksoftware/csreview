@@ -86,6 +86,7 @@ export async function fetchLatestRelease(repo, fetchImpl = globalThis.fetch, tim
 
 /** Hard ceiling on a single artifact download (defense against oversized responses). */
 export const MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024;
+export const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30000;
 
 function headerValue(res, name) {
   try {
@@ -103,13 +104,18 @@ function headerValue(res, name) {
  * the pin). Bounded redirect count.
  * @param {string} url
  * @param {typeof fetch} fetchImpl
- * @param {number} [maxHops]
+ * @param {{maxHops?: number, signal?: AbortSignal}} [options]
  */
-async function fetchOfficialFollowing(url, fetchImpl, maxHops = 5) {
+async function fetchOfficialFollowing(url, fetchImpl, options = {}) {
+  const maxHops = options.maxHops ?? 5;
   let current = String(url);
   for (let hop = 0; hop <= maxHops; hop += 1) {
     assertOfficialUrl(current); // re-assert at every hop, including redirects
-    const res = await fetchImpl(current, { headers: { 'User-Agent': 'csreview-provision' }, redirect: 'manual' });
+    const res = await fetchImpl(current, {
+      headers: { 'User-Agent': 'csreview-provision' },
+      redirect: 'manual',
+      signal: options.signal,
+    });
     const status = res && res.status;
     if (status && status >= 300 && status < 400) {
       const location = headerValue(res, 'location');
@@ -122,33 +128,104 @@ async function fetchOfficialFollowing(url, fetchImpl, maxHops = 5) {
   throw new Error('too many redirects');
 }
 
+async function readBodyBounded(res, maxBytes, abort) {
+  const declared = Number(headerValue(res, 'content-length') || 0);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    abort();
+    throw new Error(`artifact too large (${declared} bytes)`);
+  }
+
+  const chunks = [];
+  let total = 0;
+  const append = (value) => {
+    const chunk = Buffer.from(value || []);
+    total += chunk.length;
+    if (total > maxBytes) {
+      abort();
+      throw new Error(`artifact too large (more than ${maxBytes} bytes)`);
+    }
+    chunks.push(chunk);
+  };
+
+  if (res?.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        append(value);
+      }
+    } catch (error) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The original download error is more useful than cancellation failure.
+      }
+      throw error;
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Some injected readers do not implement lock release.
+      }
+    }
+  } else if (res?.body && typeof res.body[Symbol.asyncIterator] === 'function') {
+    for await (const chunk of res.body) append(chunk);
+  } else {
+    throw new Error('download response body is not streamable');
+  }
+  return Buffer.concat(chunks, total);
+}
+
+async function downloadBounded(url, fetchImpl, options = {}) {
+  if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+  const maxBytes = options.maxBytes || MAX_DOWNLOAD_BYTES;
+  const timeoutMs = options.timeoutMs || DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new Error(`download timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    const operation = (async () => {
+      const res = await fetchOfficialFollowing(url, fetchImpl, { signal: controller.signal });
+      if (!res || !res.ok) throw new Error(`download failed: HTTP ${res ? res.status : 'no-response'}`);
+      return readBodyBounded(res, maxBytes, () => controller.abort());
+    })();
+    return await Promise.race([operation, timeout]);
+  } catch (error) {
+    if (timedOut) throw new Error(`download timed out after ${timeoutMs}ms`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Download an artifact (binary) from a pinned official URL. The official-host pin
  * is enforced on the initial URL and on every redirect hop; the size is capped.
  * @param {string} url
  * @param {typeof fetch} [fetchImpl]
+ * @param {{maxBytes?: number, timeoutMs?: number}} [options]
  */
-export async function downloadBuffer(url, fetchImpl = globalThis.fetch) {
-  const res = await fetchOfficialFollowing(url, fetchImpl);
-  if (!res || !res.ok) throw new Error(`download failed: HTTP ${res ? res.status : 'no-response'}`);
-  const declared = Number(headerValue(res, 'content-length') || 0);
-  if (declared && declared > MAX_DOWNLOAD_BYTES) throw new Error(`artifact too large (${declared} bytes)`);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (buffer.length > MAX_DOWNLOAD_BYTES) throw new Error(`artifact too large (${buffer.length} bytes)`);
-  return buffer;
+export async function downloadBuffer(url, fetchImpl = globalThis.fetch, options = {}) {
+  return downloadBounded(url, fetchImpl, options);
 }
 
 /**
  * Download text (checksums file) from a pinned official URL (redirect-safe, capped).
  * @param {string} url
  * @param {typeof fetch} [fetchImpl]
+ * @param {{timeoutMs?: number}} [options]
  */
-export async function downloadText(url, fetchImpl = globalThis.fetch) {
-  const res = await fetchOfficialFollowing(url, fetchImpl);
-  if (!res || !res.ok) throw new Error(`download failed: HTTP ${res ? res.status : 'no-response'}`);
-  const text = await res.text();
-  if (text.length > 8 * 1024 * 1024) throw new Error('checksums file too large');
-  return text;
+export async function downloadText(url, fetchImpl = globalThis.fetch, options = {}) {
+  const buffer = await downloadBounded(url, fetchImpl, { ...options, maxBytes: 8 * 1024 * 1024 });
+  return buffer.toString('utf8');
 }
 
 /**

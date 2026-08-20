@@ -20,6 +20,7 @@ import {
 import { loadBaseline, applyBaseline, writeBaseline } from './baseline.js';
 import { sanitizeAgentName } from './agentName.js';
 import { getLanguage } from './languages.js';
+import { resolveOpenGrep, runOpenGrep } from './opengrep.js';
 
 /**
  * Canonical finding object exchanged by the deterministic engine, tool
@@ -57,6 +58,11 @@ import { getLanguage } from './languages.js';
  * @property {boolean} [skipped]
  * @property {number} [rawCount]
  * @property {Finding[]} [findings]
+ * @property {string} [diagnostic]
+ * @property {boolean} [complete]
+ * @property {number} [ruleErrorCount]
+ * @property {number} [skippedCount]
+ * @property {string[]} [skippedReasons]
  * @property {string} [tool]
  * @property {string} [manager]
  * @property {string} [lockfile]
@@ -65,7 +71,7 @@ import { getLanguage } from './languages.js';
 /**
  * @typedef {object} ToolResults
  * @property {string} mode
- * @property {ToolRunResult} semgrep
+ * @property {ToolRunResult} opengrep
  * @property {ToolRunResult} packageAudit
  * @property {ToolRunResult} npmAudit
  * @property {ToolRunResult} osvScanner
@@ -74,11 +80,10 @@ import { getLanguage } from './languages.js';
 const execFileAsync = promisify(execFile);
 
 // `--version` and other quick tool probes should return near-instantly; cap them
-// so a misbehaving tool (e.g. Semgrep's hanging version check) can never block a
-// scan or the doctor.
+// so a misbehaving optional tool can never block a scan or the doctor.
 const VERSION_CHECK_TIMEOUT_MS = 10000;
 const WINDOWS_CMD_EXE = 'C:\\Windows\\System32\\cmd.exe';
-const TOOL_COMMANDS = new Set(['semgrep', 'npm', 'pnpm', 'bun', 'osv-scanner', 'python3', 'python']);
+const TOOL_COMMANDS = new Set(['npm', 'pnpm', 'bun', 'osv-scanner', 'python3', 'python']);
 const WINDOWS_CMD_META_CHARS = /[\r\n&|^<>"%]/;
 
 function executable(command) {
@@ -89,28 +94,6 @@ function executable(command) {
     return `${command}.cmd`;
   }
   return command;
-}
-
-/**
- * Build exec options for a tool, disabling Semgrep's update/version "phone home"
- * check — it can hang the process (notably on Linux, where `semgrep --version`
- * prints the version and then blocks on the check). Forced off for every semgrep
- * invocation unless the user set SEMGREP_ENABLE_VERSION_CHECK explicitly. No-op
- * for other tools (returns the options object unchanged).
- *
- * @param {string} command
- * @param {import('child_process').ExecFileOptions} [options]
- * @param {NodeJS.ProcessEnv} [baseEnv]
- * @returns {import('child_process').ExecFileOptions}
- */
-export function withToolEnv(command, options = {}, baseEnv = process.env) {
-  if (command !== 'semgrep') return options;
-  return {
-    ...options,
-    // `'0'` first so it is the default, but baseEnv (an explicit user setting)
-    // overrides it, and a caller-provided options.env wins last.
-    env: { SEMGREP_ENABLE_VERSION_CHECK: '0', ...baseEnv, ...(options.env || {}) },
-  };
 }
 
 /**
@@ -126,16 +109,15 @@ function execTool(command, args, options = {}) {
   const commandPath = executable(command);
   const needsShell = process.platform === 'win32' && commandPath.endsWith('.cmd');
   validateWindowsCmdArgs(commandPath, args);
-  const execOptions = withToolEnv(command, options);
   if (needsShell) {
     // Invariant: .cmd tools execute through cmd.exe on Windows, so user-controlled
     // values such as rootDir, targets, agentName, and paths must never be passed
     // in args for .cmd commands. User input belongs in cwd or direct non-.cmd tools.
     return /** @type {Promise<{stdout: string, stderr: string}>} */ (
-      execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], execOptions)
+      execFileAsync(WINDOWS_CMD_EXE, ['/d', '/s', '/c', commandPath, ...args], options)
     );
   }
-  return /** @type {Promise<{stdout: string, stderr: string}>} */ (execFileAsync(commandPath, args, execOptions));
+  return /** @type {Promise<{stdout: string, stderr: string}>} */ (execFileAsync(commandPath, args, options));
 }
 
 /**
@@ -208,7 +190,7 @@ export function toolErrorMessage(command, err, timeoutMs) {
 function createSkippedToolResult(reason) {
   return {
     mode: 'Agent-Only',
-    semgrep: {
+    opengrep: {
       available: false,
       required: true,
       skipped: true,
@@ -263,7 +245,7 @@ const PARTIAL_REQUIRED_FIELDS = [
   'source',
 ];
 const PARTIAL_TOOL_FIELDS = ['toolExecutions', 'toolRuns', 'toolsExecuted', 'executedTools'];
-const WHOLE_TREE_TOOL_NAMES = new Set(['semgrep', 'npm audit', 'pnpm audit', 'bun audit', 'osv-scanner', 'trivy']);
+const WHOLE_TREE_TOOL_NAMES = new Set(['opengrep', 'npm audit', 'pnpm audit', 'bun audit', 'osv-scanner', 'trivy']);
 
 function normalizeKeyPart(value) {
   return String(value || '')
@@ -382,7 +364,7 @@ function normalizeToolName(entry) {
   if (value === 'bun' || value === 'bun audit' || value.includes('bun audit')) return 'bun audit';
   if (value === 'osv' || value === 'osv scanner' || value === 'osv-scanner' || value.includes('osv-scanner'))
     return 'osv-scanner';
-  if (value.includes('semgrep')) return 'semgrep';
+  if (value.includes('opengrep')) return 'opengrep';
   if (value.includes('trivy')) return 'trivy';
   return value.split(/\s+/)[0];
 }
@@ -551,41 +533,6 @@ export function reconcilePartials(outputDir, finalFindings = [], options = {}) {
     throw new Error(`Partial reconciliation failed: ${result.errors.join(' ')}`);
   }
   return result;
-}
-
-function normalizeSemgrepSeverity(extra) {
-  const severity = extra?.severity;
-  const impact = String(extra?.metadata?.impact || '').toUpperCase();
-  if (severity === 'ERROR') return impact === 'HIGH' ? 'CRITICAL' : 'HIGH';
-  if (severity === 'WARNING') return 'MEDIUM';
-  return 'LOW';
-}
-
-export function normalizeSemgrepFinding(result, index) {
-  const cwe = result.extra?.metadata?.cwe?.[0]?.match(/CWE-\d+/)?.[0] || 'N/A';
-  return {
-    id: `SEMGREP_${index + 1}`,
-    severity: normalizeSemgrepSeverity(result.extra),
-    category: result.extra?.metadata?.vulnerability_class?.[0] || 'Semgrep',
-    name: result.extra?.message || result.check_id,
-    description: result.extra?.message || 'Semgrep finding.',
-    file: result.path,
-    line: result.start?.line || 1,
-    vulnerableCode: result.extra?.lines || 'Semgrep did not include a code snippet.',
-    cwe,
-    owasp: result.extra?.metadata?.owasp?.[0] || 'N/A',
-    vibeRisk: false,
-    compliance: cwe !== 'N/A' ? 'Semgrep mapped finding' : '',
-    fix: 'Review the Semgrep finding and apply the remediation recommended by the referenced rule.',
-    confidence: 'TOOL-ONLY',
-    exploitation: 'See the Semgrep rule metadata and references for exploitation context.',
-    references: [
-      result.extra?.metadata?.source,
-      result.extra?.metadata?.shortlink,
-      ...(result.extra?.metadata?.references || []),
-    ].filter(Boolean),
-    source: 'semgrep',
-  };
 }
 
 function firstAuditAdvisory(vulnerability) {
@@ -794,70 +741,6 @@ export function normalizeOsvScannerFindings(osvJson = {}, rootDir = process.cwd(
     }
   }
   return findings;
-}
-
-/**
- * Build Semgrep `--exclude <dir>` argument pairs from the canonical ignore-dir
- * list so Semgrep skips the SAME build outputs / vendored dirs as the heuristic
- * detector. Without this Semgrep scanned `.output`, `dist`, `.nuxt`, etc. and
- * produced critical false positives from compiled bundles (e.g. prototype
- * pollution in `_nitro.mjs`).
- *
- * @param {string[]} [dirs]
- * @returns {string[]}
- */
-export function semgrepExcludeArgs(dirs = DEFAULT_IGNORE_DIRS) {
-  return dirs.flatMap((dir) => ['--exclude', dir]);
-}
-
-/**
- * Build the Semgrep scan argument list. `--config auto` (the default) pulls
- * rules from the registry and REQUIRES metrics, so they stay on; any other
- * config (a local rules path or explicit registry ref) is run with
- * `--metrics=off`, which is what makes air-gapped/private scans possible.
- *
- * @param {string} rootDir
- * @param {{config?: string}} [options]
- * @returns {string[]}
- */
-export function buildSemgrepArgs(rootDir, options = {}) {
-  const config = options.config || 'auto';
-  const args = ['--config', config, '--json', '--quiet', ...semgrepExcludeArgs()];
-  if (config !== 'auto') {
-    args.push('--metrics=off');
-  }
-  args.push(rootDir);
-  return args;
-}
-
-async function runSemgrep(rootDir, options = {}) {
-  const timeoutMs = options.timeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
-  try {
-    const versionResult = await execTool('semgrep', ['--version'], { timeout: VERSION_CHECK_TIMEOUT_MS });
-    const scanResult = await execTool('semgrep', buildSemgrepArgs(rootDir, { config: options.config }), {
-      cwd: rootDir,
-      timeout: timeoutMs,
-      maxBuffer: 20 * 1024 * 1024,
-    });
-    const parsed = JSON.parse(scanResult.stdout || '{}');
-    return {
-      available: true,
-      required: true,
-      version: versionResult.stdout.trim(),
-      error: null,
-      findings: Array.isArray(parsed.results) ? parsed.results.map(normalizeSemgrepFinding) : [],
-      rawCount: Array.isArray(parsed.results) ? parsed.results.length : 0,
-    };
-  } catch (err) {
-    return {
-      available: false,
-      required: true,
-      version: null,
-      error: toolErrorMessage('semgrep', err, timeoutMs),
-      findings: [],
-      rawCount: 0,
-    };
-  }
 }
 
 export function detectNodeAuditStrategy(rootDir) {
@@ -1091,9 +974,12 @@ export async function checkExternalTools(rootDir = process.cwd()) {
         manager: packageStrategy.manager,
         lockfile: packageStrategy.lockfile,
       };
-  const checks = await Promise.all([checkToolVersion('semgrep'), checkToolVersion('osv-scanner')]);
+  const checks = await Promise.all([
+    resolveOpenGrep({ targetRoot: rootDir, provision: false }),
+    checkToolVersion('osv-scanner'),
+  ]);
   return {
-    semgrep: { ...checks[0], required: true },
+    opengrep: { ...checks[0], required: true },
     packageAudit: { ...packageAuditCheck, required: false },
     npmAudit: { ...packageAuditCheck, required: false },
     osvScanner: { ...checks[1], required: false },
@@ -1104,7 +990,7 @@ export async function checkExternalTools(rootDir = process.cwd()) {
  * Run engine-orchestrated external tools once and return their normalized output.
  *
  * @param {string} rootDir
- * @param {{runTools?: boolean, toolTimeoutMs?: number, semgrepConfig?: string}} options
+ * @param {{runTools?: boolean, toolTimeoutMs?: number, opengrepConfig?: string, provisionTools?: boolean, runOpenGrepImpl?: typeof runOpenGrep}} options
  * @returns {Promise<ToolResults>}
  */
 async function runSecurityTools(rootDir, options) {
@@ -1113,14 +999,20 @@ async function runSecurityTools(rootDir, options) {
   }
 
   const timeoutMs = options.toolTimeoutMs || DEFAULT_TOOL_TIMEOUT_MS;
-  const [semgrep, packageAudit, osvScanner] = await Promise.all([
-    runSemgrep(rootDir, { timeoutMs, config: options.semgrepConfig }),
+  const runPrimarySast = options.runOpenGrepImpl || runOpenGrep;
+  const [opengrep, packageAudit, osvScanner] = await Promise.all([
+    runPrimarySast(rootDir, {
+      timeoutMs,
+      configPath: options.opengrepConfig,
+      excludes: DEFAULT_IGNORE_DIRS,
+      provision: Boolean(options.provisionTools),
+    }),
     runPackageAudit(rootDir, { timeoutMs }),
     runOsvScanner(rootDir, { timeoutMs }),
   ]);
   return {
-    mode: classifyToolMode({ semgrep, packageAudit, npmAudit: packageAudit, osvScanner }),
-    semgrep,
+    mode: classifyToolMode({ opengrep, packageAudit, npmAudit: packageAudit, osvScanner }),
+    opengrep,
     packageAudit,
     npmAudit: packageAudit,
     osvScanner,
@@ -1133,7 +1025,7 @@ async function runSecurityTools(rootDir, options) {
  * @param {Partial<ToolResults>} toolResults
  */
 export function classifyToolMode(toolResults = {}) {
-  const relevantTools = [toolResults.semgrep, toolResults.osvScanner];
+  const relevantTools = [toolResults.opengrep, toolResults.osvScanner];
 
   const packageAudit = toolResults.packageAudit || toolResults.npmAudit;
   if (!packageAudit?.skipped) {
@@ -1141,7 +1033,9 @@ export function classifyToolMode(toolResults = {}) {
   }
 
   const concreteTools = relevantTools.filter(Boolean);
-  const availableCount = concreteTools.filter((tool) => tool.available).length;
+  const availableCount = concreteTools.filter(
+    (tool) => tool.available && (tool !== toolResults.opengrep || !tool.diagnostic || tool.diagnostic === 'complete'),
+  ).length;
   if (availableCount === 0) {
     return 'Agent-Only';
   }
@@ -1155,7 +1049,7 @@ export function classifyToolMode(toolResults = {}) {
  * Run a full CSReview static analysis and write reports.
  *
  * @param {string} rootDir
- * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string, toolTimeoutMs?: number, semgrepConfig?: string, gatherSecurityTools?: (projectInfo: object, rootDir: string) => Promise<{findings?: Array<object>, results?: Array<object>}>}} [options]
+ * @param {{outputDir?: string, agentName?: string, runTools?: boolean, strictPartials?: boolean, htmlReportPath?: string, markdownReportPath?: string, baselinePath?: string, updateBaselinePath?: string, toolTimeoutMs?: number, opengrepConfig?: string, provisionTools?: boolean, runOpenGrepImpl?: typeof runOpenGrep, gatherSecurityTools?: (projectInfo: object, rootDir: string) => Promise<{findings?: Array<object>, results?: Array<object>}>}} [options]
  */
 export async function runAnalysis(rootDir, options = {}) {
   const startTime = Date.now();
@@ -1197,7 +1091,7 @@ export async function runAnalysis(rootDir, options = {}) {
   const partialScan = readSubagentPartials(outputDir);
   const findings = deduplicateFindings([
     ...detectVulnerabilities(detectorInput),
-    ...toolResults.semgrep.findings,
+    ...toolResults.opengrep.findings,
     ...toolResults.packageAudit.findings,
     ...toolResults.osvScanner.findings,
     ...securityToolFindings,

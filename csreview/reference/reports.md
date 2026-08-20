@@ -62,13 +62,13 @@ generators:
   "confidence": "CONFIRMED|TOOL-ONLY|HIGH|MEDIUM|LOW",
   "exploitation": "theoretical hypothesis, never a validated exploit",
   "references": ["https://..."],
-  "source": "csreview-detector|semgrep|npm-audit|pnpm-audit|bun-audit|osv-scanner|gitleaks|trivy|gosec|bandit|subagent:<domain>",
+  "source": "csreview-detector|opengrep|npm-audit|pnpm-audit|bun-audit|osv-scanner|gitleaks|trivy|gosec|bandit|subagent:<domain>",
   "vibeRisk": false,
   "compliance": "OWASP ASVS V5.3, GDPR Art.32 (CWE correlation)"
 }
 ```
 
 Confidence semantics: `CONFIRMED` = corroborated by more than one independent
-source (e.g. detector + Semgrep at the same file:line:CWE); `TOOL-ONLY` = one
+source (e.g. detector + OpenGrep at the same file:line:CWE); `TOOL-ONLY` = one
 external tool; `HIGH|MEDIUM|LOW` = heuristic detector confidence. Findings in
 test/fixture/example paths are downgraded to LOW instead of hidden.

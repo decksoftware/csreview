@@ -13,10 +13,10 @@ const DEFAULT_TIMEOUT_MS = 8000;
 //   bundled     -> rules ship inside the binary; update the binary to get new rules
 export const TOOL_REGISTRY = [
   {
-    name: 'semgrep',
-    latest: { type: 'pypi', id: 'semgrep' },
-    update: 'pipx upgrade semgrep (or: uv tool upgrade semgrep / brew upgrade semgrep)',
-    dbMode: 'online',
+    name: 'opengrep',
+    latest: { type: 'github', id: 'opengrep/opengrep' },
+    update: 'Upgrade CSReview to receive a newly reviewed OpenGrep artifact allowlist.',
+    dbMode: 'bundled',
   },
   {
     name: 'osv-scanner',

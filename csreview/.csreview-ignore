@@ -5,7 +5,7 @@
 # connection strings. When CSReview audits its OWN source, the heuristic detector
 # matches its own definitions — a scanner flagging its own rulebook. That noise is
 # specific to scanning csreview itself and never occurs in a user's project. Logic
-# bugs in these files are still covered by Semgrep + CodeQL in CI.
+# bugs in these files are still covered by OpenGrep + CodeQL in CI.
 #
 # `**/`-prefixed so it works whether the scan root is the package dir (src/...) or
 # the repo root (csreview/src/...).

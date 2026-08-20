@@ -70,7 +70,7 @@ and make it safe:
 
 ## Verified official sources (researched 2026-06-03)
 
-Trio de Ouro: Semgrep (`semgrep/semgrep`, already orchestrated), OSV-Scanner
+Trio de Ouro: OpenGrep (`opengrep/opengrep`, already orchestrated), OSV-Scanner
 (`google/osv-scanner`, already orchestrated), **Gitleaks** (`gitleaks/gitleaks`).
 Per-stack: **Bandit** (`PyCQA/bandit`), **gosec** (`securego/gosec`), **Trivy**
 (`aquasecurity/trivy`, subsumes tfsec/checkov/hadolint), eslint-plugin-security

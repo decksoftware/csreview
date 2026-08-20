@@ -2,13 +2,13 @@
 // Aggregate findings by their originating tool/source so a report makes the
 // corroboration story explicit: a finding seen by BOTH a tool and the heuristic
 // detector is CONFIRMED and should be trusted first; detector-only heuristics are
-// lower confidence. This separates "what Semgrep/OSV/audit/Gitleaks found" from
+// lower confidence. This separates "what OpenGrep/OSV/audit/Gitleaks found" from
 // "what the internal detector guessed", which is exactly the triage signal users
 // asked for.
 
 const SOURCE_LABELS = {
   'csreview-detector': 'CSReview detector (heuristic)',
-  semgrep: 'Semgrep',
+  opengrep: 'OpenGrep',
   'osv-scanner': 'OSV-Scanner',
   'npm-audit': 'npm audit',
   'pnpm-audit': 'pnpm audit',

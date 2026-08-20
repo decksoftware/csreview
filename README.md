@@ -4,14 +4,14 @@
 [![Skill Type](https://img.shields.io/badge/Type-AI%20Agent%20Skill-blue)]()
 [![Compatibility](https://img.shields.io/badge/Compatibility-Trae%20%7C%20Claude%20Code%20%7C%20Codex%20%7C%20Qwen%20%7C%20OpenCode%20%7C%20Antigravity%20%7C%20Qoder-green)]()
 
-**CSReview is an orchestration, corroboration, and evidence layer for security review of the local workspace — built for AI coding agents and the humans who supervise them.** It is local, development-time security alignment (SAST/SCA + actionable reports + agent methodology): **not** an automated penetration test, **not** a replacement for Semgrep or any scanner it orchestrates, and **read-only on your source code**.
+**CSReview is an orchestration, corroboration, and evidence layer for security review of the local workspace — built for AI coding agents and the humans who supervise them.** It is local, development-time security alignment (SAST/SCA + actionable reports + agent methodology): **not** an automated penetration test, **not** a substitute for independent security validation, and **read-only on your source code**.
 
 ## What it actually does
 
 One command runs the whole pipeline deterministically:
 
 1. **Discovers** the workspace (source, configs, `.env`, lockfiles, IaC, BaaS rules — recursively, monorepo-aware) and detects the stack.
-2. **Orchestrates real security tools** — Semgrep (required baseline), one root package audit selected from the detected npm/pnpm/bun lockfile, OSV-Scanner, and (opt-in) Gitleaks, Trivy, gosec, Bandit — and parses their JSON output.
+2. **Orchestrates real security tools** — OpenGrep 1.26.0 with a bundled offline rulepack (required baseline), one root package audit selected from the detected npm/pnpm/bun lockfile, OSV-Scanner, and (opt-in) Gitleaks, Trivy, gosec, Bandit — and parses their JSON output.
 3. **Adds its own heuristic detector** for secrets (redacted in evidence), config/IaC/BaaS misconfigurations, and common vulnerability shapes — a complementary net, not a taint-tracking SAST.
 4. **Corroborates**: findings are deduplicated across sources by `file:line:CWE`; matching evidence from the built-in detector and at least one additional normalized source is promoted to `CONFIRMED`, and every finding carries an explicit confidence label (`CONFIRMED` / `TOOL-ONLY` / heuristic `HIGH|MEDIUM|LOW`).
 5. **Reports for both audiences**: an HTML report for humans, a Markdown report for coding agents to plan remediation from, and SARIF 2.1.0 for CI — plus `--fail-on <severity>` so a pipeline can block merges, and `--baseline` so CI fails only on NEW findings.
@@ -24,23 +24,23 @@ CSReview's fidelity — results faithful to the objective, with **far fewer fals
 
 | Tool | Purpose | Official source |
 |------|---------|-----------------|
-| **Semgrep** | Multi-language SAST (required baseline) | https://github.com/semgrep/semgrep |
+| **OpenGrep 1.26.0** | Offline multi-language SAST (required baseline) | https://github.com/opengrep/opengrep |
 | **OSV-Scanner** | Dependency vulnerabilities (SCA) | https://github.com/google/osv-scanner |
 | **Gitleaks** | Hardcoded secret detection | https://github.com/gitleaks/gitleaks |
 | **Trivy** | IaC / container / filesystem misconfig + vulns | https://github.com/aquasecurity/trivy |
 | **Bandit** | Python security (AST) — *run if already installed* | https://github.com/PyCQA/bandit |
 | **gosec** | Go security (AST) | https://github.com/securego/gosec |
 
-> With `--provision-tools`, CSReview can auto-download **Gitleaks, Trivy, and gosec** from their official releases. **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`). Semgrep and OSV-Scanner are detected on `PATH` and must be installed separately.
+> With `--provision-tools`, CSReview can auto-download the approved **OpenGrep 1.26.0**, **Gitleaks**, **Trivy**, and **gosec** artifacts from official releases. **Bandit** is PyPI-distributed, so CSReview runs it only when it is already installed (`pip install bandit`). OSV-Scanner is detected on `PATH` and must be installed separately.
 
-For the opt-in stack-native tools, **`--provision-tools`** tells CSReview to:
+For approved opt-in downloads, **`--provision-tools`** tells CSReview to:
 
 - download each tool **only from its official release page** (the sources above), pinned to the official host;
 - **verify its SHA-256 checksum before running anything** (a mismatch — or any non-official host — is rejected and never executed);
-- install into an **isolated, gitignored `.csreview/bin/`** inside your project — never globally, never with `sudo`, never as a project dependency, and **never modifying your source code**;
+- install OpenGrep into CSReview's **private user cache outside the audited project**; stack-native complements use an isolated, gitignored `.csreview/bin/` — never globally, never with `sudo`, never as a project dependency, and **never modifying your source code**;
 - **fail open**: if an optional tool cannot be installed (offline or unsupported platform), the remaining available scanners and heuristics still run, and skipped tools are disclosed.
 
-Prefer to manage them yourself? Install the tools and CSReview will use whatever is already on your `PATH`; or run without them. Either way, the report tells you which tools ran and which were skipped.
+Prefer to manage them yourself? Optional tools can use installations detected on `PATH`; OpenGrep is accepted only when it matches the approved 1.26.0 version and SHA-256 digest. Either way, the report tells you which tools ran, which were partial, and which were skipped.
 
 ## Quickstart
 
@@ -61,7 +61,7 @@ csreview . --agent-name ci --fail-on high      # exit 1 if HIGH/CRITICAL remain
 
 ## Current configuration
 
-The package manifest currently defines **CSReview 0.1.4**, ESM, with **Node.js 18 or newer**. A normal scan writes static reports to `<target>/csreview-reports/` using the `codex` prefix unless another agent name is configured.
+The package manifest currently defines **CSReview 0.1.4**, ESM, with **Node.js 20 or newer**. A normal scan writes static reports to `<target>/csreview-reports/` using the `codex` prefix unless another agent name is configured.
 
 ### CLI options
 
@@ -73,14 +73,14 @@ The package manifest currently defines **CSReview 0.1.4**, ESM, with **Node.js 1
 | `--baseline <file>` | Suppresses matching known-finding fingerprints from reports and the CI gate. |
 | `--update-baseline` | Writes or refreshes the selected baseline; without `--baseline`, writes `<target>/.csreview-baseline.json`. |
 | `--strict-partials` | Fails when `<output>/.partials/` exists but its subagent results cannot be reconciled. |
-| `--provision-tools` | Runs the relevant Gitleaks, Trivy, gosec, and Bandit checks. Missing Gitleaks/Trivy/gosec binaries are downloaded from official releases and SHA-256 verified; Bandit is used only if installed. |
-| `--tool-timeout <seconds>` | Sets the per-tool timeout for Semgrep, package audit, and OSV-Scanner. Default: 120 seconds. |
-| `--semgrep-config <ref>` | Replaces Semgrep's `auto` config with a local path or registry reference; explicit configs also run with Semgrep metrics disabled. |
+| `--provision-tools` | Provisions the approved OpenGrep 1.26.0 artifact in the private user cache and runs relevant Gitleaks, Trivy, gosec, and Bandit checks. Every supported download is official-source and SHA-256 verified; Bandit is used only if installed. |
+| `--tool-timeout <seconds>` | Sets the per-tool timeout for OpenGrep, package audit, and OSV-Scanner. Default: 120 seconds. |
+| `--opengrep-config <path>` | Adds an existing local OpenGrep rule file or directory after the bundled offline rulepack. URLs, `auto`, and registry references are rejected before execution. |
 | `--dump-guide` | Adds `<agent>_db-dump-guide.html`; this is also generated automatically with local DAST. |
 | `--local-dast-url <url>` | Runs the optional loopback-only header/CORS probe after the static scan. Accepts only `localhost`, `127.0.0.1`, or `[::1]`. |
 | `--confirm-local-dast` | Mandatory explicit confirmation for `--local-dast-url`. |
 | `--no-update-check` | Skips the read-only, fail-open CSReview update advisory. |
-| `--doctor [target]` | Checks Semgrep, the lockfile-selected package-audit tool, OSV-Scanner, and tool freshness without scanning source. |
+| `--doctor [target]` | Checks the approved OpenGrep artifact, the lockfile-selected package-audit tool, OSV-Scanner, and tool freshness without scanning source. |
 | `--no-tool-check` | With `--doctor`, skips the online freshness comparison while retaining local availability checks. |
 | `--version, -v` / `--help, -h` | Prints the installed version or CLI help. |
 
@@ -93,16 +93,16 @@ Unknown flags are hard errors: a mistyped option aborts instead of silently chan
 | `.csreview-ignore` | Optional gitignore-style rules at the target root. They suppress matching findings in reports without changing source files; `!` rules can re-include a built-in exclusion. |
 | `.csreview-baseline.json` | Default deterministic baseline written only when `--update-baseline` is requested without another path. |
 | `<output>/.partials/<subagent>.json` | Optional subagent input contract (`<output>` defaults to `csreview-reports`). The engine remains the single writer of final reports. |
-| `.csreview/bin/` | Isolated, gitignored cache used only for binaries provisioned with `--provision-tools`. |
+| `%LOCALAPPDATA%\CSReview\tools` (Windows) / `$XDG_CACHE_HOME/csreview/tools` or `~/.cache/csreview/tools` (Unix) | Private cache for the approved OpenGrep artifact, outside the audited target. Entries are keyed by version and SHA-256 and include a validated manifest. |
+| `.csreview/bin/` | Isolated, gitignored target-local cache for optional stack-native tools only. OpenGrep is never loaded from this directory. |
 | `CSREVIEW_AGENT_NAME` | Default report prefix when `--agent-name` is omitted. |
-| `SEMGREP_ENABLE_VERSION_CHECK` | Defaults to `0` for Semgrep invocations to prevent version-check hangs; an explicit user value is preserved. |
 
 Static output is `<agent>_security-report.html`, `<agent>_security-findings.md`, and `<agent>_security.sarif`. Local DAST always writes its current and timestamped history reports inside `<target>/csreview-reports/`, even when the static scan uses a custom `--output` directory.
 
 ## Honest limits
 
-- The built-in regex detector is line-oriented: it catches secrets, misconfigurations, and common shapes, but it has no taint tracking or cross-file analysis — that is what Semgrep (and optionally CodeQL) are for, which is why Semgrep is the **required baseline** and runs marked lower-confidence without it.
-- Language-specific engine rules exist for JavaScript/TypeScript, Python, C#, Go, C/C++, and Delphi; other stacks lean on Semgrep + OSV-Scanner + agent checklists.
+- The built-in regex detector is line-oriented: it catches secrets, misconfigurations, and common shapes, but it has no taint tracking or cross-file analysis — OpenGrep (and optionally CodeQL) provides the required SAST baseline, and runs are marked lower-confidence without it.
+- Language-specific engine rules exist for JavaScript/TypeScript, Python, C#, Go, C/C++, and Delphi; other stacks lean on OpenGrep + OSV-Scanner + agent checklists.
 - Compliance output (LGPD/GDPR/SOC 2/HIPAA/CCPA-CPRA, OWASP ASVS, SLSA) is **indicative correlation by CWE** to support a human review — the engine computes no coverage percentages and no per-article verdicts, and the agent instructions forbid fabricating them.
 - The optional Phase 9 "local DAST" is a conservative loopback-only HTTP probe (headers, CORS, reachability) with hard engine guards — it is not a penetration test.
 
@@ -131,11 +131,11 @@ It is two things working together, and the agent must keep them straight:
 1. **A deterministic engine** (the `csreview` CLI). It discovers the workspace, runs and parses the external security tools, applies its own heuristic detector, deduplicates evidence across sources (promoting corroborated findings to `CONFIRMED`), scores the result, and writes ALL report files. The engine is the single writer of reports.
 2. **An agent methodology** (this document + `reference/`). The agent runs the engine, then adds what tools cannot: contextual review of flagged code, framework research, remediation planning, and honest communication of confidence and limits.
 
-CSReview's value is orchestration, corroboration, and evidence — it complements Semgrep and the other scanners; it does not replace them. Its built-in regex detector is a complementary net (secrets, misconfigurations, BaaS rules, common injection shapes), not a taint-tracking SAST.
+CSReview's value is orchestration, corroboration, and evidence — OpenGrep is its required SAST engine, complemented by dependency and stack-native scanners. Its built-in regex detector is a complementary net (secrets, misconfigurations, BaaS rules, common injection shapes), not a taint-tracking SAST.
 
 ## Scope
 
-- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as Semgrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is in scope only after remediation work, only with explicit user confirmation, and only against `localhost`, `127.0.0.1`, or the IPv6 loopback `[::1]`.
+- **IN SCOPE**: the local development workspace/project, including all local source code, configuration, `.env` files, infrastructure-as-code, and BaaS rule files. Local SAST/SCA tools such as OpenGrep, npm/pnpm package audit, OSV-Scanner, and framework-native scanners may be run against that local code only. Optional Phase 9 Local DAST is in scope only after remediation work, only with explicit user confirmation, and only against `localhost`, `127.0.0.1`, or the IPv6 loopback `[::1]`.
 - **GOAL**: improve the SECURITY and EFFICIENCY (cost/performance) of the project under development.
 - **OUT OF SCOPE / PROHIBITED**: testing, probing, or calling live, deployed, staging, or production systems; external service endpoints used by the app; unconfirmed dynamic testing; DAST against non-local running targets; modifying audited code; exfiltrating data.
 - **Reference documentation research is ALLOWED**: reading OWASP, CWE, CVE/NVD, OSV, vendor advisories, and official framework documentation to ground remediation is allowed. That is reading documentation, not probing a target.
@@ -174,9 +174,9 @@ Key options (run `csreview --help` for the full list):
 | `--output, -o <dir>` | Output directory (default `<target>/csreview-reports/`) |
 | `--fail-on <severity>` | CI gate: exit 1 when findings at or above `critical\|high\|medium\|low` remain |
 | `--baseline <file>` / `--update-baseline` | Suppress known findings so CI fails only on NEW ones |
-| `--provision-tools` | Opt-in: run Gitleaks/Trivy/gosec/Bandit; missing ones are downloaded from OFFICIAL releases, SHA-256-verified, into gitignored `.csreview/bin/` |
+| `--provision-tools` | Opt-in: provision the approved OpenGrep 1.26.0 artifact in CSReview's private user cache and run Gitleaks/Trivy/gosec/Bandit; downloads are official-source and SHA-256-verified |
 | `--tool-timeout <s>` | Per-tool timeout in seconds (default 120); timeouts are reported as timeouts, not as missing tools |
-| `--semgrep-config <ref>` | Use local/explicit Semgrep rules instead of `auto` (offline-friendly; adds `--metrics=off`) |
+| `--opengrep-config <path>` | Add an existing local OpenGrep rule file/directory to the bundled offline rulepack; URLs, `auto`, and registry references are rejected |
 | `--local-dast-url <url>` + `--confirm-local-dast` | Phase 9 local-only dynamic complement (see below) |
 | `--strict-partials` | Fail when subagent partials do not reconcile |
 | `--no-update-check` | Skip the read-only, fail-open self-update advisory |
@@ -189,7 +189,7 @@ The engine invokes and parses these deterministically; their findings enter dedu
 
 | Tool | Engine behavior |
 |------|-----------------|
-| Semgrep | **Mandatory baseline attempt** on every run: `semgrep --config auto --json --quiet <path>` (or `--semgrep-config <ref>`). If unavailable or timed out, the run is marked lower confidence with install instructions (`pipx install semgrep`). |
+| OpenGrep 1.26.0 | **Mandatory baseline attempt** on every run with the bundled offline rulepack. Only the approved version and SHA-256 digests are accepted; `--provision-tools` can install the platform artifact in CSReview's private user cache. |
 | Node package audit | Selected by lockfile: `pnpm audit --json` for `pnpm-lock.yaml`, `npm audit --json` for npm lockfiles, `bun audit --json` for `bun.lock`/`bun.lockb` |
 | OSV-Scanner | `osv-scanner scan --format json <path>` for multi-ecosystem dependency vulnerabilities |
 | Gitleaks / Trivy / gosec / Bandit | Only with `--provision-tools` (Bandit only if already installed); results corroborate the detector |
@@ -201,7 +201,7 @@ The engine invokes and parses these deterministically; their findings enter dedu
 The engine reports which mode ran; the agent MUST tell the user and what it implies:
 
 - **Mode A: Self-Hosted (RECOMMENDED)** — all relevant engine-orchestrated tools are available; parsed, reproducible findings; highest-confidence engine mode.
-- **Mode B: Agent-Only (FALLBACK)** — no engine-orchestrated tool available; regex/static heuristics plus careful agent reading. Lower precision and recall; line-oriented checks miss multiline issues. Mark the run lower confidence and recommend installing Semgrep and OSV-Scanner.
+- **Mode B: Agent-Only (FALLBACK)** — no engine-orchestrated tool available; regex/static heuristics plus careful agent reading. Lower precision and recall; line-oriented checks miss multiline issues. Mark the run lower confidence and recommend provisioning OpenGrep plus installing OSV-Scanner.
 - **Mode C: Hybrid (PARTIAL)** — some tools available; missing ones are disclosed in the report.
 
 ### Agent-Recommended Stack-Native Tools
@@ -212,18 +212,18 @@ Tools below are recommended for agent-assisted validation when relevant to the d
 
 | Detected stack | Prefer read-only commands and scanners |
 | --- | --- |
-| JavaScript / TypeScript / React / Node | lockfile-selected package audit (engine), configured `eslint`, `eslint-plugin-security`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `typescript-eslint`, Semgrep |
-| .NET / C# / ASP.NET | `dotnet format analyzers --verify-no-changes`, `dotnet list package --include-transitive --vulnerable --format json`, Roslyn analyzers, Semgrep, CodeQL when available |
-| Kotlin / Android / JVM | `gradlew lint` or `./gradlew lint`, Android Lint, `detekt`, `ktlint`, Qodana, Gradle dependency checks, OSV-Scanner, Semgrep |
-| Go | `go vet ./...`, `govulncheck ./...`, `gosec ./...`, `staticcheck ./...`, `golangci-lint run`, OSV-Scanner, Semgrep |
-| Python | `pip-audit`, `bandit -r`, `ruff check`, `safety` when available, OSV-Scanner, Semgrep |
-| Java / Spring / Maven / Gradle | Maven/Gradle dependency checks, SpotBugs/FindSecBugs when configured, Checkstyle/PMD when configured, Qodana, OSV-Scanner, Semgrep |
-| Rust | `cargo audit`, `cargo deny check`, `cargo clippy --all-targets --all-features`, OSV-Scanner, Semgrep |
-| PHP / Laravel / Symfony | `composer audit --format=json`, PHPStan/Psalm when configured, OSV-Scanner, Semgrep |
-| Ruby / Rails | `bundle audit`, `brakeman`, RuboCop when configured, OSV-Scanner, Semgrep |
-| Flutter / Dart | `dart analyze`, `flutter analyze`, `dart pub outdated --json`, OSV-Scanner, Semgrep |
-| IaC / containers / CI | Checkov, Trivy, Hadolint, Dockerfile linting, GitHub Actions linting, Terraform validators, Semgrep |
-| BaaS / database rules | Supabase CLI checks when configured, Firebase rules validation when configured, Appwrite/Convex/PocketBase config review, SQL linters when configured, Semgrep |
+| JavaScript / TypeScript / React / Node | OpenGrep (engine), lockfile-selected package audit, configured `eslint`, `eslint-plugin-security`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `typescript-eslint` |
+| .NET / C# / ASP.NET | OpenGrep, `dotnet format analyzers --verify-no-changes`, `dotnet list package --include-transitive --vulnerable --format json`, Roslyn analyzers, CodeQL when available |
+| Kotlin / Android / JVM | OpenGrep, `gradlew lint` or `./gradlew lint`, Android Lint, `detekt`, `ktlint`, Qodana, Gradle dependency checks, OSV-Scanner |
+| Go | OpenGrep, `go vet ./...`, `govulncheck ./...`, `gosec ./...`, `staticcheck ./...`, `golangci-lint run`, OSV-Scanner |
+| Python | OpenGrep, `pip-audit`, `bandit -r`, `ruff check`, `safety` when available, OSV-Scanner |
+| Java / Spring / Maven / Gradle | OpenGrep, Maven/Gradle dependency checks, SpotBugs/FindSecBugs when configured, Checkstyle/PMD when configured, Qodana, OSV-Scanner |
+| Rust | OpenGrep, `cargo audit`, `cargo deny check`, `cargo clippy --all-targets --all-features`, OSV-Scanner |
+| PHP / Laravel / Symfony | OpenGrep, `composer audit --format=json`, PHPStan/Psalm when configured, OSV-Scanner |
+| Ruby / Rails | OpenGrep, `bundle audit`, `brakeman`, RuboCop when configured, OSV-Scanner |
+| Flutter / Dart | OpenGrep, `dart analyze`, `flutter analyze`, `dart pub outdated --json`, OSV-Scanner |
+| IaC / containers / CI | OpenGrep, Checkov, Trivy, Hadolint, Dockerfile linting, GitHub Actions linting, Terraform validators |
+| BaaS / database rules | OpenGrep, Supabase CLI checks when configured, Firebase rules validation when configured, Appwrite/Convex/PocketBase config review, SQL linters when configured |
 
 ## External Research Protocol
 
@@ -282,7 +282,7 @@ When the agent runtime supports subagents and the workspace is large enough to j
 
 1. **Single writer**: Subagents MUST NOT write final reports. Each writes only partial findings JSON to `csreview-reports/.partials/<subagent>.json`; the coordinator is the only writer of the final reports.
 2. **Canonical finding schema**: every partial finding uses the engine finding object and sets `source: "subagent:<domain>"` — without it the engine cannot correlate evidence or promote to `CONFIRMED`.
-3. **Run SAST/SCA tools once**: whole-tree tools (Semgrep, package audit, OSV-Scanner, Trivy) run only in the gate; subagents read cached tool output instead of re-executing them.
+3. **Run SAST/SCA tools once**: whole-tree tools (OpenGrep, package audit, OSV-Scanner, Trivy) run only in the gate; subagents read cached tool output instead of re-executing them.
 
 **Final check**: CSReview produces one pair of final reports, the final count matches the sum of partial findings after deduplication, and no tool appears executed more than once in the log. The engine enforces this via `partialReconciliation` (`--strict-partials` to fail hard).
 
@@ -331,7 +331,7 @@ CSReview includes integrated review modes (no extra skills required) — methodo
 
 ## Supported Technologies
 
-Frontend (React, Vue, Nuxt, Angular, Svelte, Next.js), mobile (Flutter, Kotlin/Android, Swift/iOS, React Native), backend (Node.js, Python, C#/.NET, Go, Java, PHP, Ruby), systems (C, C++, Rust), desktop (Electron, Tauri), Delphi/Lazarus/Free Pascal, SQL/NoSQL databases, BaaS platforms (Supabase, Firebase, Appwrite, Neon, PocketBase, Convex, and similar), installers/DLLs/binaries, and OS-specific surfaces (macOS, iOS, Linux, Windows). Detection depth varies by stack: language-specific engine rules exist for JavaScript/TypeScript, Python, C#, Go, C/C++, and Delphi; other stacks rely on Semgrep, OSV-Scanner, and the agent checklists in `reference/security-checklists.md`.
+Frontend (React, Vue, Nuxt, Angular, Svelte, Next.js), mobile (Flutter, Kotlin/Android, Swift/iOS, React Native), backend (Node.js, Python, C#/.NET, Go, Java, PHP, Ruby), systems (C, C++, Rust), desktop (Electron, Tauri), Delphi/Lazarus/Free Pascal, SQL/NoSQL databases, BaaS platforms (Supabase, Firebase, Appwrite, Neon, PocketBase, Convex, and similar), installers/DLLs/binaries, and OS-specific surfaces (macOS, iOS, Linux, Windows). Detection depth varies by stack: language-specific engine rules exist for JavaScript/TypeScript, Python, C#, Go, C/C++, and Delphi; other stacks rely on OpenGrep, OSV-Scanner, and the agent checklists in `reference/security-checklists.md`.
 
 ### AI Agent Compatibility
 
@@ -402,7 +402,7 @@ Then install the CLI globally (`npm install -g ./csreview` from the repo root) s
 ```
 csreview <dir> --agent-name <agent>
   └─ scan workspace (recursive, monorepo-aware, generated caches excluded)
-  └─ run engine-orchestrated tools in parallel (Semgrep · package audit · OSV-Scanner [· Gitleaks/Trivy/gosec/Bandit])
+  └─ run engine-orchestrated tools in parallel (OpenGrep · package audit · OSV-Scanner [· Gitleaks/Trivy/gosec/Bandit])
   └─ heuristic detector pass (secrets redacted, config rules scoped to config files)
   └─ merge subagent partials (when present) and deduplicate by file:line:CWE
        └─ multi-source evidence -> CONFIRMED
@@ -416,7 +416,7 @@ After remediation, an optional Phase 9 local-only probe (`--local-dast-url http:
 
 ## Contributing
 
-Issues and PRs are welcome at [decksoftware/csreview](https://github.com/decksoftware/csreview). High-leverage areas: detector precision tests (safe/unsafe pairs per pattern), language-specific rules beyond the current six, additional engine-orchestrated tool normalizers, and report UX. Every PR runs lint, typecheck, the full test suite on 3 OSes, a Semgrep scan, and a dogfood self-scan gated with `--fail-on high`.
+Issues and PRs are welcome at [decksoftware/csreview](https://github.com/decksoftware/csreview). High-leverage areas: detector precision tests (safe/unsafe pairs per pattern), language-specific rules beyond the current six, additional engine-orchestrated tool normalizers, and report UX. Every PR runs lint, typecheck, the full test suite on 3 OSes, an offline OpenGrep scan, and a dogfood self-scan gated with `--fail-on high`.
 
 ## License
 
@@ -424,7 +424,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-CSReview is a **Deck Software** project idealized by **Márcio PS**, built with assistance, review, and ideas from AI coding agents and tools including Claude Code, Trae, MiniMax, Qwen, Cascade, Codex, GLM, MiMo, and other reviewer agents — plus the open-source scanners it orchestrates: Semgrep, OSV-Scanner, Gitleaks, Trivy, gosec, and Bandit.
+CSReview is a **Deck Software** project idealized by **Márcio PS**, built with assistance, review, and ideas from AI coding agents and tools including Claude Code, Trae, MiniMax, Qwen, Cascade, Codex, GLM, MiMo, and other reviewer agents — plus the open-source scanners it orchestrates: OpenGrep, OSV-Scanner, Gitleaks, Trivy, gosec, and Bandit.
 
 ## Support
 

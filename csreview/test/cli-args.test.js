@@ -24,6 +24,9 @@ test('parseCliArgs parses the documented surface', () => {
     '--strict-partials',
     '--fail-on',
     'high',
+    '--opengrep-config',
+    'local-rules',
+    '--provision-tools',
   ]);
   assert.equal(parsed.targetArg, 'C:/proj');
   assert.equal(parsed.output, 'reports');
@@ -31,6 +34,8 @@ test('parseCliArgs parses the documented surface', () => {
   assert.equal(parsed.baseline, 'base.json');
   assert.equal(parsed.strictPartials, true);
   assert.equal(parsed.failOn, 'HIGH');
+  assert.equal(parsed.opengrepConfig, 'local-rules');
+  assert.equal(parsed.provisionTools, true);
   assert.equal(parsed.version, false);
 });
 

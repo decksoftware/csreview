@@ -63,7 +63,7 @@ async function runUpdatePreflight() {
  */
 async function runToolFreshness(tools) {
   const installed = {
-    semgrep: tools.semgrep?.version,
+    opengrep: tools.opengrep?.version,
     'osv-scanner': tools.osvScanner?.version,
     npm:
       (tools.packageAudit || tools.npmAudit)?.manager === 'npm'
@@ -103,7 +103,7 @@ if (cli.doctor) {
 
   /** @type {Array<[string, {available: boolean, version?: string, reason?: string, error?: string}, string]>} */
   const rows = [
-    ['Semgrep', tools.semgrep, 'required'],
+    ['OpenGrep', tools.opengrep, 'required'],
     ['Package audit', tools.packageAudit || tools.npmAudit, 'recommended for Node.js'],
     ['OSV-Scanner', tools.osvScanner, 'recommended'],
   ];
@@ -118,7 +118,7 @@ if (cli.doctor) {
     await runToolFreshness(tools);
   }
 
-  console.log('\n  Install Semgrep with: pipx install semgrep');
+  console.log('\n  Provision approved OpenGrep 1.26.0 with: csreview <target> --provision-tools');
   console.log('  Install OSV-Scanner with: winget install Google.OSVScanner\n');
   process.exit(0);
 }
@@ -141,9 +141,9 @@ ${chalk.bold('OPTIONS:')}
   --baseline <file>     Suppress findings already recorded in a baseline JSON file
   --update-baseline     Write/refresh the baseline file from this run (with --baseline or default .csreview-baseline.json)
   --dump-guide          Also generate a read-only per-backend local DB dump guide (auto with --local-dast-url)
-  --provision-tools     Opt-in: run stack-native security tools (Gitleaks/Trivy/Bandit/gosec) and, if missing, download them from OFFICIAL sources (SHA-256 verified) into an isolated, gitignored .csreview/bin/. Higher fidelity, fewer false positives.
-  --tool-timeout <s>    Per-tool timeout in seconds for Semgrep/audits/OSV (default: 120)
-  --semgrep-config <c>  Semgrep config to use instead of "auto" (local rules path or registry ref; enables offline scans)
+  --provision-tools     Opt-in: install approved, SHA-256-verified security tools. OpenGrep 1.26.0 uses the private user cache; stack-native tools use the target's gitignored .csreview/bin/.
+  --tool-timeout <s>    Per-tool timeout in seconds for OpenGrep/audits/OSV (default: 120)
+  --opengrep-config <c> Add an existing local OpenGrep rule file/directory to the bundled offline rulepack. URLs, auto, and registry references are rejected.
   --no-update-check     Skip the pre-flight CSReview self-update check
   --doctor              Check external security tools (and their freshness) without scanning source code
   --version, -v         Print the installed CSReview version
@@ -177,7 +177,7 @@ ${chalk.bold('OUTPUT:')}
 ${chalk.bold('SECURITY TOOLS:')}
   CSReview is read-only for audited source code. It writes reports only.
   Required baseline:
-  - Semgrep      - Advanced multi-language SAST (pipx install semgrep)
+  - OpenGrep 1.26.0 - Offline multi-language SAST (use --provision-tools if missing)
 
   Recommended complements:
   - npm/pnpm audit - Node.js dependency vulnerability scanning selected from lockfiles
@@ -215,15 +215,15 @@ console.log(chalk.gray(`  Started: ${new Date().toISOString()}\n`));
 
 await runUpdatePreflight();
 
-// Opt-in, user-informed security-tool provisioning. CSReview only downloads when
-// you pass --provision-tools; here it tells you exactly what it will install and
-// from where, then runs the tools from an isolated, gitignored .csreview/bin/.
+// Opt-in, user-informed security-tool provisioning. OpenGrep uses the private
+// user cache; stack-native complements remain isolated under .csreview/bin/.
 let securityToolGatherer;
 if (provisionTools) {
   console.log(chalk.bold('  Security tooling (opt-in provisioning enabled)\n'));
-  console.log(chalk.yellow('  CSReview will use stack-native security tools and, if missing, DOWNLOAD them'));
+  console.log(chalk.yellow('  CSReview will use approved security tools and, if missing, DOWNLOAD them'));
   console.log(chalk.yellow('  from their OFFICIAL release pages, verify SHA-256 checksums, and run them from an'));
-  console.log(chalk.yellow('  isolated, gitignored .csreview/bin/ (never globally, never as project deps).'));
+  console.log(chalk.yellow('  isolated cache (never globally, never as project dependencies).'));
+  console.log(chalk.gray("  Required SAST: OpenGrep 1.26.0 in CSReview's private user cache."));
   console.log(chalk.gray('  Auto-installed if missing (official release + SHA-256): Gitleaks, Trivy, gosec.'));
   console.log(chalk.gray('  Used only if already installed: Bandit (pip install bandit).'));
   console.log(
@@ -246,7 +246,8 @@ try {
     baselinePath,
     updateBaselinePath,
     toolTimeoutMs: cli.toolTimeoutMs || undefined,
-    semgrepConfig: cli.semgrepConfig || undefined,
+    opengrepConfig: cli.opengrepConfig || undefined,
+    provisionTools,
     gatherSecurityTools: securityToolGatherer,
   });
 
@@ -258,13 +259,17 @@ try {
   console.log(`  Files Scanned:  ${result.filesScanned}`);
   console.log(`  Analysis Mode:  ${result.toolResults?.mode || 'Agent-Only'}`);
 
-  if (result.toolResults?.semgrep?.available) {
+  if (result.toolResults?.opengrep?.available) {
+    const partial = result.toolResults.opengrep.diagnostic === 'partial-skips';
     console.log(
-      `  Semgrep:        ${result.toolResults.semgrep.version} (${result.toolResults.semgrep.rawCount} findings)`,
+      `  OpenGrep:       ${partial ? 'PARTIAL ' : ''}${result.toolResults.opengrep.version} (${result.toolResults.opengrep.rawCount} findings${partial ? `, ${result.toolResults.opengrep.skippedCount || 0} skipped` : ''})`,
     );
+    if (partial && result.toolResults.opengrep.skippedReasons?.length) {
+      console.log(`                  ${result.toolResults.opengrep.skippedReasons.join('; ')}`);
+    }
   } else {
     console.log(
-      `  Semgrep:        REQUIRED but unavailable (${result.toolResults?.semgrep?.error || result.toolResults?.semgrep?.reason || 'not run'})`,
+      `  OpenGrep:       REQUIRED but unavailable (${result.toolResults?.opengrep?.error || result.toolResults?.opengrep?.reason || 'not run'})`,
     );
   }
 

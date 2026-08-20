@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { originBreakdown, labelForSource } from '../src/reports/summary.js';
 
 test('labelForSource maps known sources and formats subagent domains', () => {
-  assert.equal(labelForSource('semgrep'), 'Semgrep');
+  assert.equal(labelForSource('opengrep'), 'OpenGrep');
   assert.equal(labelForSource('osv-scanner'), 'OSV-Scanner');
   assert.equal(labelForSource('npm-audit'), 'npm audit');
   assert.equal(labelForSource('csreview-detector'), 'CSReview detector (heuristic)');
@@ -15,7 +15,7 @@ test('labelForSource maps known sources and formats subagent domains', () => {
 test('originBreakdown counts findings per source and flags corroborated ones', () => {
   const { confirmed, total, rows } = originBreakdown([
     { sources: ['csreview-detector', 'gitleaks'], confidence: 'CONFIRMED' },
-    { sources: ['semgrep'] },
+    { sources: ['opengrep'] },
     { source: 'osv-scanner' },
     { sources: ['csreview-detector'] },
     {}, // no source -> defaults to the detector
@@ -24,14 +24,14 @@ test('originBreakdown counts findings per source and flags corroborated ones', (
   assert.equal(confirmed, 1);
   const map = Object.fromEntries(rows.map((r) => [r.source, r.count]));
   assert.equal(map['gitleaks'], 1);
-  assert.equal(map['semgrep'], 1);
+  assert.equal(map['opengrep'], 1);
   assert.equal(map['osv-scanner'], 1);
   assert.equal(map['csreview-detector'], 3); // 2 explicit + 1 default
 });
 
 test('originBreakdown rows sort by count desc and it tolerates empty input', () => {
   assert.deepEqual(originBreakdown([]), { confirmed: 0, total: 0, rows: [] });
-  const { rows } = originBreakdown([{ source: 'semgrep' }, { source: 'semgrep' }, { source: 'gitleaks' }]);
-  assert.equal(rows[0].source, 'semgrep');
+  const { rows } = originBreakdown([{ source: 'opengrep' }, { source: 'opengrep' }, { source: 'gitleaks' }]);
+  assert.equal(rows[0].source, 'opengrep');
   assert.equal(rows[0].count, 2);
 });

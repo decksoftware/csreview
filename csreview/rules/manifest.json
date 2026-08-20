@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "rulepack": "csreview-offline",
+  "rules": [
+    {
+      "id": "csreview.javascript.security.eval-detected",
+      "source": "CSReview native rule",
+      "sourcePath": "rules/csreview.yml",
+      "sourceHash": "63cef874e3960938e7e62047940ce88710da99f159689abe001718a11cfea535",
+      "transformedHash": "63cef874e3960938e7e62047940ce88710da99f159689abe001718a11cfea535",
+      "spdxLicense": "MIT"
+    },
+    {
+      "id": "csreview.python.security.pickle-loads",
+      "source": "CSReview native rule",
+      "sourcePath": "rules/csreview.yml",
+      "sourceHash": "63cef874e3960938e7e62047940ce88710da99f159689abe001718a11cfea535",
+      "transformedHash": "63cef874e3960938e7e62047940ce88710da99f159689abe001718a11cfea535",
+      "spdxLicense": "MIT"
+    }
+  ]
+}

@@ -14,6 +14,21 @@ import {
   makeSecurityToolGatherer,
 } from '../src/provisionRuntime.js';
 
+function streamedResponse(chunks = [], options = {}) {
+  const status = options.status || 200;
+  const headers = new Map(Object.entries(options.headers || {}));
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers,
+    body: {
+      async *[Symbol.asyncIterator]() {
+        for (const chunk of chunks) yield Buffer.from(chunk);
+      },
+    },
+  };
+}
+
 test('probeOnPath returns a version from --version output, or null when missing', async () => {
   const ok = await probeOnPath('gitleaks', ['version'], async () => ({ stdout: 'v8.18.0\n' }));
   assert.equal(ok.version, '8.18.0');
@@ -57,7 +72,7 @@ test('downloadBuffer/downloadText refuse non-official hosts before fetching', as
   const fetchImpl = /** @type {any} */ (
     async () => {
       called = true;
-      return { ok: true, arrayBuffer: async () => new ArrayBuffer(0), text: async () => '' };
+      return streamedResponse([]);
     }
   );
   await assert.rejects(() => downloadBuffer('https://evil.com/x.tar.gz', fetchImpl), /non-official host/);
@@ -140,9 +155,71 @@ test('downloadBuffer re-asserts the official host on EVERY redirect hop (M1)', a
       if (url.includes('github.com/gitleaks')) {
         return { status: 302, headers: new Map([['location', 'https://objects.githubusercontent.com/blob']]) };
       }
-      return { ok: true, status: 200, headers: new Map(), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+      return streamedResponse([[1, 2, 3]]);
     }
   );
   const buf = await downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', toOfficial);
   assert.ok(Buffer.isBuffer(buf) && buf.length === 3);
+});
+
+test('downloadBuffer enforces a whole-operation timeout', async () => {
+  const stalled = /** @type {any} */ (async () => new Promise(() => {}));
+
+  await assert.rejects(
+    () =>
+      downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', stalled, {
+        timeoutMs: 20,
+      }),
+    /timed out after 20ms/i,
+  );
+});
+
+test('downloadBuffer aborts a chunked response as soon as it exceeds the selected ceiling', async () => {
+  let produced = 0;
+  const chunked = /** @type {any} */ (
+    async () => ({
+      ...streamedResponse([]),
+      body: {
+        async *[Symbol.asyncIterator]() {
+          for (const chunk of [Buffer.alloc(4), Buffer.alloc(4), Buffer.alloc(4)]) {
+            produced += 1;
+            yield chunk;
+          }
+        },
+      },
+    })
+  );
+
+  await assert.rejects(
+    () =>
+      downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', chunked, {
+        maxBytes: 6,
+      }),
+    /artifact too large/i,
+  );
+  assert.equal(produced, 2);
+});
+
+test('downloadBuffer rejects an oversized declared length before reading the body', async () => {
+  let produced = false;
+  const declaredOversize = /** @type {any} */ (
+    async () => ({
+      ...streamedResponse([], { headers: { 'content-length': '9' } }),
+      body: {
+        async *[Symbol.asyncIterator]() {
+          produced = true;
+          yield Buffer.alloc(1);
+        },
+      },
+    })
+  );
+
+  await assert.rejects(
+    () =>
+      downloadBuffer('https://github.com/gitleaks/gitleaks/releases/download/v8/a.tar.gz', declaredOversize, {
+        maxBytes: 8,
+      }),
+    /artifact too large/i,
+  );
+  assert.equal(produced, false);
 });

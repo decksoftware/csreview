@@ -86,33 +86,33 @@ test('scanTextForRedFlags catches risky changes and is clean otherwise', () => {
 // ---------- toolFreshness ----------
 
 test('parseVersion extracts version from --version output', () => {
-  assert.equal(parseVersion('semgrep 1.164.0'), '1.164.0');
+  assert.equal(parseVersion('opengrep 1.26.0'), '1.26.0');
   assert.equal(parseVersion('osv-scanner version: 2.3.8\nbuilt at ...'), '2.3.8');
   assert.equal(parseVersion('no version here'), null);
 });
 
 test('checkToolFreshness flags outdated tools and skips unavailable ones', async () => {
   const fetchImpl = makeFetch({
-    'pypi.org/pypi/semgrep': { info: { version: '1.164.0' } },
+    'opengrep/opengrep': { tag_name: 'v1.26.0' },
     'google/osv-scanner': { tag_name: 'v2.3.8' },
   });
   const results = await checkToolFreshness(
-    { semgrep: 'semgrep 1.100.0', 'osv-scanner': 'osv-scanner version: 2.3.8' },
+    { opengrep: 'opengrep 1.26.0', 'osv-scanner': 'osv-scanner version: 2.3.8' },
     { fetchImpl },
   );
   assert.equal(results.length, 2); // trivy/npm/etc not installed -> skipped
-  const semgrep = results.find((r) => r.name === 'semgrep');
+  const opengrep = results.find((r) => r.name === 'opengrep');
   const osv = results.find((r) => r.name === 'osv-scanner');
-  assert.equal(semgrep.status, 'outdated');
+  assert.equal(opengrep.status, 'current');
   assert.equal(osv.status, 'current');
-  assert.match(semgrep.update, /pipx upgrade semgrep/);
+  assert.match(opengrep.update, /upgrade CSReview/i);
 });
 
 test('checkToolFreshness is fail-open when offline (status unknown, never throws)', async () => {
   const throwing = async () => {
     throw new Error('offline');
   };
-  const results = await checkToolFreshness({ semgrep: 'semgrep 1.100.0' }, { fetchImpl: throwing });
+  const results = await checkToolFreshness({ opengrep: 'opengrep 1.26.0' }, { fetchImpl: throwing });
   assert.equal(results.length, 1);
   assert.equal(results[0].status, 'unknown');
 });

@@ -299,16 +299,22 @@ export function generateHtmlReport(projectInfo, findings, outputPath, metadata =
   const vibeRiskCount = findings.filter((f) => f.vibeRisk).length;
   const now = new Date().toISOString().split('T')[0];
   const toolMode = metadata.toolResults?.mode || 'Agent-Only';
-  const semgrep = metadata.toolResults?.semgrep || {};
+  const opengrep = metadata.toolResults?.opengrep || {};
   const packageAudit = metadata.toolResults?.packageAudit || metadata.toolResults?.npmAudit || {};
   const osvScanner = metadata.toolResults?.osvScanner || {};
   const assuranceNote =
     totalFindings === 0
       ? '<p><strong>Assurance note:</strong> No findings were identified by this run. This does not prove the application is secure; it means CSReview and the available external tools did not detect reportable issues in the analyzed scope.</p>'
       : '';
-  const semgrepText = semgrep.available
-    ? `Semgrep ${escapeHtml(semgrep.version || '')} (${semgrep.rawCount || semgrep.findings?.length || 0} findings)`
-    : `Semgrep unavailable${semgrep.error ? `: ${escapeHtml(semgrep.error)}` : ''}. Install with pipx install semgrep, uv tool install semgrep, or brew install semgrep.`;
+  const skippedReasons = Array.isArray(opengrep.skippedReasons)
+    ? opengrep.skippedReasons.map(escapeHtml).join('; ')
+    : '';
+  const opengrepText =
+    opengrep.available && opengrep.diagnostic === 'partial-skips'
+      ? `OpenGrep PARTIAL ${escapeHtml(opengrep.version || '')} (${opengrep.rawCount || opengrep.findings?.length || 0} findings, ${opengrep.skippedCount || 0} skipped${skippedReasons ? `: ${skippedReasons}` : ''})`
+      : opengrep.available
+        ? `OpenGrep ${escapeHtml(opengrep.version || '')} (${opengrep.rawCount || opengrep.findings?.length || 0} findings)`
+        : `OpenGrep unavailable${opengrep.error || opengrep.reason ? `: ${escapeHtml(opengrep.error || opengrep.reason)}` : ''}. Run CSReview with --provision-tools to install the approved OpenGrep 1.26.0 artifact.`;
   const packageAuditLabel = packageAudit.tool || 'package audit';
   const packageAuditText = packageAudit.available
     ? `${escapeHtml(packageAuditLabel)} ${escapeHtml(packageAudit.version || '')} (${packageAudit.rawCount || packageAudit.findings?.length || 0} findings)`
@@ -1461,7 +1467,7 @@ a:hover {
               <div class="score-metric-label">Mode</div>
             </div>
           </div>
-          <p><strong>Semgrep:</strong> ${semgrepText}</p>
+          <p><strong>OpenGrep:</strong> ${opengrepText}</p>
           <p><strong>Dependency scanners:</strong> ${packageAuditText} ${osvScannerText}</p>
           <p><strong>Findings by origin</strong> (trust corroborated first): ${origin.confirmed} CONFIRMED (tool+detector) &middot; ${originText}</p>
           <p>CSReview remains read-only for audited source code and only writes report artifacts.</p>

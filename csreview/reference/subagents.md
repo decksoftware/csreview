@@ -57,7 +57,7 @@ whole-tree tools ran only once.
 
 When `csreview-reports/.partials/` exists, the engine reads the partial JSON,
 validates the schema, merges valid `subagent:*` findings into the final set
-(deduplicating against `csreview-detector`, `semgrep`, `npm-audit`,
+(deduplicating against `csreview-detector`, `opengrep`, `npm-audit`,
 `osv-scanner`, and the provisioned tools — matching `file:line:CWE` evidence is
 promoted to `CONFIRMED`), and exposes `partialReconciliation` in its result.
 `--strict-partials` (CLI) or `reconcilePartials(outputDir, findings, { strict:

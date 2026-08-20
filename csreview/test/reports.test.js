@@ -178,14 +178,14 @@ test('Markdown report includes a findings-by-origin breakdown (trust corroborate
   const out = tmpFile('origin_security-findings.md');
   const findings = [
     baseFinding({ id: 'A', sources: ['csreview-detector', 'gitleaks'], confidence: 'CONFIRMED' }),
-    baseFinding({ id: 'B', sources: ['semgrep'] }),
+    baseFinding({ id: 'B', sources: ['opengrep'] }),
   ];
   generateMarkdownReport({ name: 'demo', files: ['src/app.js'], configFiles: [] }, findings, out, {});
   const md = fs.readFileSync(out, 'utf8');
   assert.match(md, /Findings by origin/);
   assert.match(md, /1 CONFIRMED \(tool\+detector\)/);
   assert.match(md, /Gitleaks 1/);
-  assert.match(md, /Semgrep 1/);
+  assert.match(md, /OpenGrep 1/);
 });
 
 test('HTML report includes a findings-by-origin breakdown', () => {

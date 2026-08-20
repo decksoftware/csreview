@@ -46,7 +46,7 @@ Out of scope:
 
 - Findings that CSReview reports about your own audited code. That is the tool
   working as intended, not a vulnerability in CSReview.
-- Vulnerabilities in third-party scanners such as Semgrep, OSV-Scanner, npm
+- Vulnerabilities in third-party scanners such as OpenGrep, OSV-Scanner, npm
   audit, CodeQL, or similar tools. Report those to their upstream projects.
 - Social engineering or anything requiring access to a maintainer's machine.
 - Testing, probing, or calling live systems, production services, external

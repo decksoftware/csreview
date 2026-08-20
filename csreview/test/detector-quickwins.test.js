@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { detectVulnerabilities } from '../src/detector.js';
-import { normalizeSemgrepFinding } from '../src/index.js';
+import { normalizeOpenGrepFinding } from '../src/opengrep.js';
 
 function tmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'csr-qw-'));
@@ -33,18 +33,18 @@ test('static eval("1 + 1") is not flagged after removing the broad UNSAFE_EVAL h
   assert.equal(findings.filter((f) => f.cwe === 'CWE-95').length, 0);
 });
 
-// --- Task 3: semgrep severity can reach CRITICAL via metadata ---
+// --- Task 3: OpenGrep severity can reach CRITICAL via metadata ---
 
-test('semgrep ERROR with metadata.impact HIGH maps to CRITICAL', () => {
-  const f = normalizeSemgrepFinding(
+test('OpenGrep ERROR with metadata.impact HIGH maps to CRITICAL', () => {
+  const f = normalizeOpenGrepFinding(
     { check_id: 'r', path: 'a.js', start: { line: 3 }, extra: { severity: 'ERROR', metadata: { impact: 'HIGH' } } },
     0,
   );
   assert.equal(f.severity, 'CRITICAL');
 });
 
-test('semgrep ERROR without high impact stays HIGH', () => {
-  const f = normalizeSemgrepFinding(
+test('OpenGrep ERROR without high impact stays HIGH', () => {
+  const f = normalizeOpenGrepFinding(
     { check_id: 'r', path: 'a.js', start: { line: 3 }, extra: { severity: 'ERROR', metadata: {} } },
     0,
   );

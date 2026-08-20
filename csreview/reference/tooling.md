@@ -1,6 +1,6 @@
 # CSReview Reference - External Tool Detection, Invocation & Installation
 
-The engine orchestrates Semgrep, the lockfile-selected Node package audit, and
+The engine orchestrates OpenGrep 1.26.0, the lockfile-selected Node package audit, and
 OSV-Scanner deterministically (plus Gitleaks/Trivy/gosec/Bandit under
 `--provision-tools`). Everything else here is **agent-recommended**: run a tool
 only if it is already available or the user opted into provisioning, report its
@@ -10,7 +10,7 @@ project.
 ## Detection commands
 
 ```bash
-semgrep --version          # MANDATORY baseline attempt
+opengrep --version         # engine accepts exactly 1.26.0
 osv-scanner --version
 npm --version              # npm audit (npm lockfiles)
 pnpm --version             # pnpm audit (pnpm-lock.yaml)
@@ -39,10 +39,10 @@ govulncheck -version
 ## Per-tool invocation (read-only forms)
 
 ```bash
-# Semgrep — registry rules (default; requires network) or local rules
-semgrep --config auto --json --quiet <project_path>
-semgrep --config p/security-audit --config p/secrets --config p/owasp-top-ten --json <project_path>
-# The engine accepts --semgrep-config <ref> to replace "auto" (adds --metrics=off).
+# OpenGrep — bundled offline rules plus an optional existing local config
+opengrep scan --config <csreview_rules> --json --quiet --disable-version-check <project_path>
+# --opengrep-config <path> adds a local file/directory. URLs, auto, and registry
+# references are rejected before the process starts.
 
 # Dependency SCA
 osv-scanner scan --format json <project_path>
@@ -68,7 +68,7 @@ Never run fix/update/remediation subcommands (e.g. `osv-scanner fix`,
 ## Installation pointers (for "missing recommended tool" entries)
 
 ```bash
-pipx install semgrep                # or: uv tool install semgrep / brew install semgrep
+csreview <project_path> --provision-tools  # approved OpenGrep 1.26.0 artifact
 winget install Google.OSVScanner    # or: brew install osv-scanner
 pip install bandit
 pip install pip-audit
@@ -82,8 +82,10 @@ choco install hadolint              # or: brew install hadolint
 npm install --save-dev eslint-plugin-security eslint-plugin-no-unsanitized
 ```
 
-With `--provision-tools`, the engine downloads Gitleaks, Trivy, and gosec from
-their official GitHub releases, verifies the published SHA-256 checksums before
-anything is made executable, and runs them from an isolated, gitignored
-`.csreview/bin/` — never globally, never as project dependencies. Bandit is
+With `--provision-tools`, the engine downloads the approved OpenGrep 1.26.0,
+Gitleaks, Trivy, and gosec artifacts from their official GitHub releases and
+verifies SHA-256 before execution. OpenGrep is stored outside the audited target
+in CSReview's private user cache, keyed by version and digest with a validated
+manifest. Stack-native tools run from an isolated, gitignored `.csreview/bin/`.
+Nothing is installed globally or as a project dependency. Bandit is
 PyPI-distributed and is only used when already installed.

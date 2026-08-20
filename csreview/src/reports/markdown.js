@@ -8,7 +8,7 @@ const SEVERITY_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 };
 
 /**
  * Escape untrusted text for inline Markdown contexts (headings, list items,
- * table cells). Finding fields can originate from Semgrep messages, dependency
+ * table cells). Finding fields can originate from OpenGrep messages, dependency
  * advisories, or scanned file paths, so they are treated as untrusted and must
  * not be able to break tables, code spans, links, or inject raw HTML.
  *
@@ -44,7 +44,7 @@ export function mdCodeSpan(value) {
 
 /**
  * Render a fenced code block whose fence is always longer than any backtick run
- * inside the snippet, so attacker-controlled code (e.g. a Semgrep snippet that
+ * inside the snippet, so attacker-controlled code (e.g. an OpenGrep snippet that
  * itself contains ```) can never break out of the block and inject Markdown.
  *
  * @param {unknown} code
@@ -587,12 +587,18 @@ function buildToolMetadata(toolResults) {
     return '- **External Tools**: Not reported';
   }
 
-  const semgrep = toolResults.semgrep || {};
+  const opengrep = toolResults.opengrep || {};
   const packageAudit = toolResults.packageAudit || toolResults.npmAudit || {};
   const osvScanner = toolResults.osvScanner || {};
-  const semgrepStatus = semgrep.available
-    ? `available (${escapeMdInline(semgrep.version || 'version unknown')}), ${semgrep.rawCount || semgrep.findings?.length || 0} findings`
-    : `not available${semgrep.error ? ` (${escapeMdInline(semgrep.error)})` : ''}`;
+  const skippedReasons = Array.isArray(opengrep.skippedReasons)
+    ? opengrep.skippedReasons.map(escapeMdInline).join('; ')
+    : '';
+  const opengrepStatus =
+    opengrep.available && opengrep.diagnostic === 'partial-skips'
+      ? `PARTIAL (${escapeMdInline(opengrep.version || 'version unknown')}), ${opengrep.rawCount || opengrep.findings?.length || 0} findings, ${opengrep.skippedCount || 0} skipped${skippedReasons ? ` (${skippedReasons})` : ''}`
+      : opengrep.available
+        ? `available (${escapeMdInline(opengrep.version || 'version unknown')}), ${opengrep.rawCount || opengrep.findings?.length || 0} findings`
+        : `not available${opengrep.error || opengrep.reason ? ` (${escapeMdInline(opengrep.error || opengrep.reason)})` : ''}`;
   const packageAuditLabel = escapeMdInline(packageAudit.tool || 'package audit');
   const packageAuditStatus = packageAudit.available
     ? `${packageAuditLabel} available (${escapeMdInline(packageAudit.version || 'version unknown')}), ${packageAudit.rawCount || packageAudit.findings?.length || 0} findings`
@@ -600,18 +606,18 @@ function buildToolMetadata(toolResults) {
   const osvScannerStatus = osvScanner.available
     ? `available (${escapeMdInline(osvScanner.version || 'version unknown')}), ${osvScanner.rawCount || osvScanner.findings?.length || 0} findings`
     : `not available${osvScanner.error ? ` (${escapeMdInline(osvScanner.error)})` : ''}`;
-  const semgrepInstall = semgrep.available
+  const opengrepInstall = opengrep.available
     ? ''
-    : '\n- **Install Semgrep**: `pipx install semgrep`, `uv tool install semgrep`, or `brew install semgrep`, then verify with `semgrep --version`';
+    : '\n- **Install OpenGrep**: rerun CSReview with `--provision-tools` to fetch the approved OpenGrep 1.26.0 artifact, or install that exact approved version on `PATH`';
   const osvInstall = osvScanner.available
     ? ''
     : '\n- **Install OSV-Scanner**: `winget install Google.OSVScanner`, `brew install osv-scanner`, or `go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest`, then verify with `osv-scanner --version`';
 
   return `- **Analysis Mode**: ${escapeMdInline(toolResults.mode || 'Agent-Only')}
-- **Semgrep Required**: Yes
-- **Semgrep Status**: ${semgrepStatus}
+- **OpenGrep Required**: Yes
+- **OpenGrep Status**: ${opengrepStatus}
 - **Package Audit Status**: ${packageAuditStatus}
-- **OSV-Scanner Status**: ${osvScannerStatus}${semgrepInstall}${osvInstall}`;
+- **OSV-Scanner Status**: ${osvScannerStatus}${opengrepInstall}${osvInstall}`;
 }
 
 function buildScanMetadata(projectInfo, findings, startTime, metadata = {}) {

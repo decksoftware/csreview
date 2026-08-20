@@ -5,6 +5,6 @@
 # remediation content (regex literals, rule names, descriptions, exploitation
 # examples, the DB-dump guide's sample connection strings); the heuristic detector
 # matches its own definitions when scanning csreview itself. Logic bugs are still
-# covered by Semgrep + CodeQL in CI.
+# covered by OpenGrep + CodeQL in CI.
 **/src/detector.js
 **/src/dumpGuide.js

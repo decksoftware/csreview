@@ -8,7 +8,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "test": "node --test",
@@ -22,14 +22,23 @@
     "sast",
     "sca",
     "ai-agent-skill",
-    "semgrep",
+    "opengrep",
     "code-review"
   ],
   "author": "Deck Software / Márcio PS",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/decksoftware/csreview.git"
+  },
+  "homepage": "https://github.com/decksoftware/csreview#readme",
+  "bugs": {
+    "url": "https://github.com/decksoftware/csreview/issues"
+  },
   "files": [
     "src/",
     "reference/",
+    "rules/",
     "SKILL.md",
     "README.md",
     "LICENSE"
@@ -51,15 +60,15 @@
     },
     "requiredExternalTools": [
       {
-        "name": "semgrep",
+        "name": "opengrep",
         "purpose": "multi-language static application security testing",
         "required": true,
+        "version": "1.26.0",
         "install": [
-          "pipx install semgrep",
-          "uv tool install semgrep",
-          "brew install semgrep"
+          "csreview <target> --provision-tools",
+          "or install the approved OpenGrep 1.26.0 artifact on PATH"
         ],
-        "verify": "semgrep --version"
+        "verify": "opengrep --version"
       }
     ],
     "recommendedExternalTools": [
